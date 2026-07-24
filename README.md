@@ -52,10 +52,9 @@ A data mining project that analyzes the PaySim mobile money transaction dataset 
   - Business insights
 
 ## Dataset
-Dataset : PaySim Fraud Transactions  
+Dataset : [PaySim Fraud Transactions](https://www.kaggle.com/datasets/ealaxi/paysim1)  
 Records : 6.300.000+  
-Feature : 11  
-Link : https://www.kaggle.com/datasets/ealaxi/paysim1
+Feature : 11
 
 ## Tech Stack
 | Category | Technology |
