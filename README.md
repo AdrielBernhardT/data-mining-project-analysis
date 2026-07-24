@@ -75,44 +75,44 @@ Link : https://www.kaggle.com/datasets/ealaxi/paysim1
 Clone the project
 
 ```bash
-  git clone https://github.com/darrentimotius/data-mining
+git clone https://github.com/darrentimotius/data-mining
 ```
 
 Go to the project directory
 
 ```bash
-  cd data-mining
+cd data-mining
 ```
 
 Create a virtual environment (optional):
 
 ```bash
-  conda create -n data-mining python=3.10
+conda create -n data-mining python=3.10
 ```
 
 Activate the environment:
 
 ```bash
-  conda activate data-mining
+conda activate data-mining
 ```
 
 
 Install dependencies
 
 ```bash
-  pip install -r requirement.txt
+pip install -r requirement.txt
 ```
 
 Start the server
 
 ```bash
-  prefect server start
+prefect server start
 ```
 
 Start the dashboard
 
 ```bash
-  cd phase_5 && python app.py
+cd phase_5 && python app.py
 ```
 
 ## License
