@@ -25,6 +25,7 @@ A data mining project that analyzes the PaySim mobile money transaction dataset 
   - BIRCH + HDBSCAN
 
   Evaluation using:
+  - Elbow Method
   - Silhouette Score
   - Davies-Bouldin Index
   - Calinski-Harabasz Index
