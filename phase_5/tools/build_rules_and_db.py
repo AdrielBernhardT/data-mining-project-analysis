@@ -7,7 +7,7 @@ tools/build_rules_and_db.py  (skrip pengembangan/uji, BUKAN bagian pipeline resm
    selebihnya tetap bisa diakses & dicari".
 2. 10 pola TERATAS tetap memakai angka ASLI dari top_rules_business.parquet
    (tidak diganti data sintetis) - dikunci sebagai is_top10=True.
-3. Menulis semuanya ke satu berkas fance_dashboard.duckdb yang dipakai app.py.
+3. Menulis semuanya ke satu berkas paysim_dashboard.duckdb yang dipakai app.py.
 
 Pipeline resmi (pipeline/flow.py) melakukan hal yang serupa terhadap data ASLI
 kelompok saat dijalankan di komputer mereka sendiri.
@@ -29,7 +29,7 @@ import config as cfg
 BUILD_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BUILD_DIR / "data"
 SYN_PATH = DATA_DIR / "raw_synthetic" / "synthetic_transactions.parquet"
-DUCKDB_PATH = DATA_DIR / "fance_dashboard.duckdb"
+DUCKDB_PATH = DATA_DIR / "paysim_dashboard.duckdb"
 
 MIN_SUPPORT = 0.005
 MIN_CONFIDENCE = 0.50
@@ -37,7 +37,6 @@ MIN_LIFT = 1.20
 MAX_LEN = 3
 FRAUD_MIN_SUPPORT = 0.0008
 
-# 10 pola ASLI (dari top_rules_business.parquet, lihat NOTES.md) - dikunci apa adanya
 REAL_TOP10 = [
     dict(antecedents_str="origError_very_low, orig_drained_yes", consequents_str="isFraud_yes",
          support=0.001259, confidence=1.000000, lift=776.211297),
@@ -176,7 +175,6 @@ def main():
     real10 = pd.DataFrame(REAL_TOP10)
     real10["is_real"] = True
     mined["is_real"] = False
-    # buang hasil tambang yg kebetulan duplikat dgn 10 asli
     key_real = set(zip(real10["antecedents_str"], real10["consequents_str"]))
     mined = mined[~mined.apply(lambda r: (r["antecedents_str"], r["consequents_str"]) in key_real, axis=1)]
 
@@ -190,7 +188,6 @@ def main():
     takeaways = all_rules.apply(business_takeaway_and_recommendation, axis=1, result_type="expand")
     all_rules["takeaway"], all_rules["recommendation"] = takeaways[0], takeaways[1]
 
-    # is_top10: 10 baris dgn lift tertinggi DI ANTARA yang is_real (menjaga urutan asli top_rules_business)
     all_rules = all_rules.sort_values(["is_real", "lift"], ascending=[False, False]).reset_index(drop=True)
     all_rules["is_top10"] = False
     all_rules.loc[all_rules["is_real"], "is_top10"] = True
@@ -207,7 +204,7 @@ def main():
 
     con.execute("CREATE TABLE transaksi AS SELECT * FROM read_parquet(?)", [str(SYN_PATH)])
     con.execute("ALTER TABLE transaksi ALTER COLUMN cluster_kmeans SET DATA TYPE TINYINT")
-    for col in ["wilayah", "transaction_type", "risk_level", "anomaly_type", "investigation_category"]:
+    for col in ["jenis_tujuan", "status_kuras", "transaction_type", "risk_level", "anomaly_type", "investigation_category"]:
         con.execute(f"CREATE INDEX idx_{col} ON transaksi ({col})")
     con.execute("CREATE INDEX idx_risk_score ON transaksi (risk_score)")
     con.execute("CREATE INDEX idx_amount ON transaksi (amount)")
@@ -226,25 +223,22 @@ def main():
     print(f"   transaksi: {n_transaksi:,} baris | pola: {n_pola} baris")
 
     print("4) Membangun cube pra-agregasi (kunci performa <100ms) ...")
-    # Semua kolom yang bisa difilter dikelompokkan sekali di sini. risk_score/
-    # risk_level/anomaly_type/investigation_category adalah fungsi deterministik
-    # dari kombinasi flag, jadi cukup dibawa apa adanya (bukan dihitung ulang).
     con.execute("""
         CREATE TABLE cube AS
         SELECT
-            wilayah, transaction_type, cluster_kmeans, isFraud,
+            jenis_tujuan, status_kuras, transaction_type, cluster_kmeans, isFraud,
             flag_IQR, flag_ZScore, flag_IsoForest, flag_HDBSCAN, flag_BalanceMismatch,
             risk_score, risk_level, anomaly_type, investigation_category,
             (risk_score >= 3 OR flag_HDBSCAN) AS high_risk,
             COUNT(*) AS n
         FROM transaksi
-        GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14
+        GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
     """)
     n_cube = con.execute("SELECT COUNT(*) FROM cube").fetchone()[0]
     check = con.execute("SELECT SUM(n) FROM cube").fetchone()[0]
     print(f"   cube: {n_cube:,} baris ringkas (representasi {check:,} baris transaksi)")
     assert check == n_transaksi, "cube tidak konsisten dengan tabel transaksi!"
-    for col in ["wilayah", "transaction_type", "cluster_kmeans", "risk_level"]:
+    for col in ["jenis_tujuan", "status_kuras", "transaction_type", "cluster_kmeans", "risk_level"]:
         con.execute(f"CREATE INDEX idx_cube_{col} ON cube ({col})")
 
     con.close()

@@ -32,15 +32,16 @@ from data_backend.base import DataBackend, Filters
 try:
     from elasticsearch import Elasticsearch
     from elasticsearch.helpers import bulk as es_bulk
-except ImportError:  # pragma: no cover
+except ImportError:
     Elasticsearch = None
     es_bulk = None
 
-INDEX_TRANSAKSI = "fance_transaksi"
-INDEX_POLA = "fance_pola_asosiasi"
+INDEX_TRANSAKSI = "paysim_transaksi"
+INDEX_POLA = "paysim_pola_asosiasi"
 
 CATEGORICAL_FIELD_MAP = {
-    "wilayah": "wilayah",
+    "jenis_tujuan": "jenis_tujuan",
+    "status_kuras": "status_kuras",
     "jenis_transaksi": "transaction_type",
     "segmen": "cluster_kmeans",
     "risk_level": "risk_level",
@@ -74,8 +75,6 @@ def _build_es_query(filters: Filters, extra_must: Optional[list] = None) -> dict
         must.append({
             "multi_match": {
                 "query": filters.search,
-                # transaction_id pakai sub-field .keyword utk exact/prefix,
-                # anomaly_reason full-text dgn analisa bahasa standar
                 "fields": ["transaction_id^3", "anomaly_reason"],
                 "type": "best_fields",
             }
@@ -108,7 +107,6 @@ class ElasticsearchBackend(DataBackend):
         body = {"query": _build_es_query(filters), "aggs": aggs, "size": size, "track_total_hits": True}
         return self.client.search(index=INDEX_TRANSAKSI, body=body).body
 
-    # ------------------------------------------------------------------
     def get_kpi(self, filters: Filters) -> dict[str, Any]:
         aggs = {
             "fraud": {"filter": {"term": {"isFraud": True}}},
@@ -217,10 +215,16 @@ class ElasticsearchBackend(DataBackend):
             matrix.append(entry)
         return matrix
 
-    def get_wilayah_breakdown(self, filters: Filters) -> list[dict]:
+    def get_dest_type_breakdown(self, filters: Filters) -> list[dict]:
+        return self._breakdown_by_term(filters, "jenis_tujuan", "jenis_tujuan")
+
+    def get_drain_status_breakdown(self, filters: Filters) -> list[dict]:
+        return self._breakdown_by_term(filters, "status_kuras", "status_kuras")
+
+    def _breakdown_by_term(self, filters: Filters, es_field: str, out_key: str) -> list[dict]:
         aggs = {
-            "per_wilayah": {
-                "terms": {"field": "wilayah", "size": 20},
+            "per_term": {
+                "terms": {"field": es_field, "size": 20},
                 "aggs": {
                     "fraud": {"filter": {"term": {"isFraud": True}}},
                     "high_risk": {"filter": {"bool": {"should": [
@@ -231,17 +235,17 @@ class ElasticsearchBackend(DataBackend):
             }
         }
         res = self._agg_search(filters, aggs)
-        buckets = res["aggregations"]["per_wilayah"]["buckets"]
+        buckets = res["aggregations"]["per_term"]["buckets"]
         total = sum(b["doc_count"] for b in buckets) or 1
         out = []
         for b in buckets:
             n = b["doc_count"]
-            out.append(dict(
-                wilayah=b["key"], transactions=n, fraud_count=b["fraud"]["doc_count"],
-                high_risk_count=b["high_risk"]["doc_count"], avg_risk_score=b["avg_risk"]["value"] or 0.0,
-                share=n / total, fraud_rate=(b["fraud"]["doc_count"] / n) if n else 0.0,
-                high_risk_rate=(b["high_risk"]["doc_count"] / n) if n else 0.0,
-            ))
+            out.append({
+                out_key: b["key"], "transactions": n, "fraud_count": b["fraud"]["doc_count"],
+                "high_risk_count": b["high_risk"]["doc_count"], "avg_risk_score": b["avg_risk"]["value"] or 0.0,
+                "share": n / total, "fraud_rate": (b["fraud"]["doc_count"] / n) if n else 0.0,
+                "high_risk_rate": (b["high_risk"]["doc_count"] / n) if n else 0.0,
+            })
         return sorted(out, key=lambda r: -r["transactions"])
 
     def get_transaction_type_breakdown(self, filters: Filters) -> list[dict]:
@@ -263,7 +267,7 @@ class ElasticsearchBackend(DataBackend):
     ) -> tuple[list[dict], int]:
         sort_field_map = {
             "risk_score": "risk_score", "amount": "amount", "step": "step",
-            "transaction_type": "transaction_type", "wilayah": "wilayah",
+            "transaction_type": "transaction_type", "jenis_tujuan": "jenis_tujuan",
             "cluster_kmeans": "cluster_kmeans", "risk_level": "risk_level.keyword",
             "isFraud": "isFraud", "anomaly_type": "anomaly_type",
         }
@@ -281,13 +285,18 @@ class ElasticsearchBackend(DataBackend):
         return rows, total
 
     def get_rules(self, rule_group: Optional[str] = None, min_lift: float = 0.0,
-                  search: str = "", limit: Optional[int] = None) -> list[dict]:
+                  search: str = "", limit: Optional[int] = None,
+                  min_confidence: float = 0.0, attribute: Optional[str] = None) -> list[dict]:
         filt = []
         must = []
         if rule_group:
             filt.append({"term": {"rule_group": rule_group}})
         if min_lift:
             filt.append({"range": {"lift": {"gte": min_lift}}})
+        if min_confidence:
+            filt.append({"range": {"confidence": {"gte": min_confidence}}})
+        if attribute:
+            must.append({"multi_match": {"query": attribute, "fields": ["antecedents_str", "consequents_str"]}})
         if search:
             must.append({"multi_match": {"query": search, "fields": ["when_text", "then_text"]}})
         query = {"bool": {}}

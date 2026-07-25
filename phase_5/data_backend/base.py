@@ -15,7 +15,8 @@ Kenapa dua backend?
 
 Setiap method menerima `filters: dict` dengan kunci opsional berikut (semua
 opsional, nilai kosong/None berarti "semua data"):
-    wilayah: list[str]
+    jenis_tujuan: list[str]       (Merchant/Nasabah)
+    status_kuras: list[str]       (Terkuras Habis/Tidak Terkuras)
     jenis_transaksi: list[str]
     segmen: list[int]
     risk_level: list[str]
@@ -34,7 +35,8 @@ from typing import Any, Optional
 
 @dataclass
 class Filters:
-    wilayah: list = field(default_factory=list)
+    jenis_tujuan: list = field(default_factory=list)
+    status_kuras: list = field(default_factory=list)
     jenis_transaksi: list = field(default_factory=list)
     segmen: list = field(default_factory=list)
     risk_level: list = field(default_factory=list)
@@ -66,6 +68,22 @@ class DataBackend(ABC):
     def ping(self) -> bool:
         """True kalau backend siap dipakai (mis. koneksi ES berhasil)."""
 
+    def get_segment_projection(self, filters: "Filters", method: str | None = None, dim: int | None = None) -> list[dict]:
+        """Titik koordinat UMAP/t-SNE untuk scatter segmen. Default membaca file
+        DuckDB (selalu dibangun pipeline, walau backend aktif Elasticsearch).
+        method/dim memilih varian. Kembalikan [] kalau tak ada - dashboard tetap
+        jalan. DuckDBBackend meng-override agar memakai koneksinya sendiri."""
+        try:
+            from data_backend.duckdb_backend import DuckDBBackend
+            import config as cfg
+            db = DuckDBBackend(cfg.DUCKDB_PATH, read_only=True)
+            try:
+                return db.get_segment_projection(filters, method=method, dim=dim)
+            finally:
+                db._con.close()
+        except Exception:
+            return []
+
     @abstractmethod
     def get_kpi(self, filters: Filters) -> dict[str, Any]:
         """Total transaksi, fraud, high-risk, fraud_rate, enrichment untuk filter aktif."""
@@ -73,6 +91,21 @@ class DataBackend(ABC):
     @abstractmethod
     def get_segment_summary(self, filters: Filters) -> list[dict]:
         """Statistik per segmen (dihitung ulang sesuai filter aktif)."""
+
+    def get_cluster_profile(self, filters: "Filters") -> list[dict]:
+        """Profil per segmen (jenis transaksi dominan, fraud/high-risk/merchant
+        share). Default membaca DuckDB langsung; DuckDBBackend meng-override.
+        ES backend memakai default ini (DuckDB selalu dibangun pipeline)."""
+        try:
+            from data_backend.duckdb_backend import DuckDBBackend
+            import config as cfg
+            db = DuckDBBackend(cfg.DUCKDB_PATH, read_only=True)
+            try:
+                return db.get_cluster_profile(filters)
+            finally:
+                db._con.close()
+        except Exception:
+            return []
 
     @abstractmethod
     def get_risk_summary(self, filters: Filters) -> list[dict]:
@@ -95,7 +128,11 @@ class DataBackend(ABC):
         ...
 
     @abstractmethod
-    def get_wilayah_breakdown(self, filters: Filters) -> list[dict]:
+    def get_dest_type_breakdown(self, filters: Filters) -> list[dict]:
+        ...
+
+    @abstractmethod
+    def get_drain_status_breakdown(self, filters: Filters) -> list[dict]:
         ...
 
     @abstractmethod
@@ -111,7 +148,8 @@ class DataBackend(ABC):
 
     @abstractmethod
     def get_rules(self, rule_group: Optional[str] = None, min_lift: float = 0.0,
-                  search: str = "", limit: Optional[int] = None) -> list[dict]:
+                  search: str = "", limit: Optional[int] = None,
+                  min_confidence: float = 0.0, attribute: Optional[str] = None) -> list[dict]:
         ...
 
     @abstractmethod

@@ -7,12 +7,12 @@ Entry point dashboard. Menjalankan:
 
 Backend data dipilih OTOMATIS saat startup:
 1) Coba Elasticsearch (ELASTICSEARCH_URL, default http://localhost:9200).
-2) Kalau tidak terjangkau, otomatis pakai DuckDB (data/fance_dashboard.duckdb).
+2) Kalau tidak terjangkau, otomatis pakai DuckDB (data/paysim_dashboard.duckdb).
 Status backend yang aktif ditampilkan di badge pojok kanan atas setiap halaman
 supaya transparan ke pengguna (dan dosen) data sedang dilayani dari mana.
 
 Jalankan `python -m pipeline.flow --mode synthetic` (atau --mode real) dulu
-kalau data/fance_dashboard.duckdb belum ada.
+kalau data/paysim_dashboard.duckdb belum ada.
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from theme import GOOGLE_FONTS_URL
 from data_backend.base import DataBackend
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("fance-dashboard")
+logger = logging.getLogger("paysim-dashboard")
 
 
 def pilih_backend() -> DataBackend:
@@ -67,7 +67,7 @@ app = Dash(
     __name__,
     use_pages=True,
     suppress_callback_exceptions=True,
-    title="Dashboard Deteksi Fraud Perbankan — Kelompok Fance",
+    title="Dashboard Deteksi Fraud Perbankan Paysim",
     update_title=None,
     index_string=f"""<!DOCTYPE html>
 <html lang="id">
@@ -117,7 +117,7 @@ def navbar(pathname: str) -> html.Div:
                 html.Span("🏦", className="brand-icon"),
                 html.Div([
                     html.Div("Deteksi Fraud Perbankan", className="brand-title"),
-                    html.Div("Kelompok Fance — Data Mining Project Phase 5", className="brand-subtitle"),
+                    html.Div("Paysim: Data Mining Project Phase 5", className="brand-subtitle"),
                 ]),
             ], className="brand"),
             backend_badge,
@@ -133,7 +133,13 @@ app.layout = html.Div([
     html.Footer([
         html.P([
             "Dashboard dibangun di atas hasil analisis Phase 1-4 (preprocessing, segmentasi, pola asosiasi, "
-            "deteksi anomali). ", html.Span(cfg.WILAYAH_DISCLOSURE, className="footer-disclosure"),
+            "deteksi anomali). ", html.Span(
+                "Seluruh dimensi filter (segmen, jenis transaksi, tipe tujuan, status saldo, level risiko, "
+                "jenis anomali) diturunkan langsung dari atribut yang benar-benar ada di dataset PaySim - "
+                "dataset ini tidak memiliki atribut geografis/waktu kalender, sehingga tidak ada dimensi "
+                "spasial/temporal yang dipaksakan.",
+                className="footer-disclosure",
+            ),
         ]),
     ], className="app-footer"),
 ], className="app-shell")

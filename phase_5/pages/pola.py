@@ -1,153 +1,182 @@
 """
-pages/pola.py - Pola & Aturan Asosiasi
-Menjawab catatan dosen:
-- "Association rules di translate jadi bahasa manusia (jika -> maka)" -> rule_card (JIKA/MAKA)
-- "pattern recomendation tambain yang detail, di page pattern tambahin recomendation" -> field recommendation per pola
-- "tampil 10 aja tapi yg lainnya tetap bisa di akses ... insight 10 aja" -> 10 pola utama (kartu besar)
-  + tabel semua 135 pola (bisa dicari/difilter) dengan tag "Insight utama" / "Insight tambahan"
-- "setiap page at least ada slicer nya" -> filter kelompok pola + pencarian + ambang lift
-- "Text yang ditampilkan jangan sampai kepotong" -> rule-clause di CSS pakai white-space normal + word-wrap
+pages/pola.py - Pola & Aturan Asosiasi (Association Rules)
+
+Semua filter (kelompok, atribut, confidence, lift) ada di SIDEBAR untuk
+konsistensi. Scatter confidence-vs-lift jadi visual utama (intuitif untuk
+association rules). Teks dipangkas, rekomendasi ditambahkan.
 """
 from __future__ import annotations
 
 import dash
-from dash import html, dcc, Input, Output, State, callback, dash_table
+from dash import html, dcc, Input, Output, callback, dash_table
 
 import config as cfg
 from app import BACKEND
-from components.filter_bar import make_filter_bar
-from components.cards import kpi_row, section_header, rule_card, info_banner, empty_state
+from components.filter_bar import make_filter_bar, page_shell, sidebar_toggle_callback
+from components.cards import kpi_row, section_header, rule_card, ranked_rule_card, empty_state
 import components.charts as ch
 
 dash.register_page(__name__, path="/pola", name="Pola & Asosiasi", title="Pola & Aturan Asosiasi")
 
 PAGE = "pola"
-GROUP_ALL = "Semua kelompok"
-GROUP_CHOICES = [GROUP_ALL] + cfg.RULE_GROUP_ORDER
 
-layout = html.Div([
-    html.Div([
-        html.Div("PATTERN MINING", className="page-hero-eyebrow"),
-        html.H1("Pola & Aturan Asosiasi (Association Rules)"),
-        html.P(
-            "Kombinasi atribut transaksi yang paling sering muncul bersamaan, diterjemahkan ke kalimat "
-            "JIKA → MAKA supaya mudah dibaca tanpa latar belakang statistik. 10 pola paling penting "
-            "ditonjolkan sebagai kartu besar; seluruh 135 pola yang ditemukan tetap bisa diakses, dicari, "
-            "dan difilter di bagian bawah halaman."
-        ),
-    ], className="page-hero"),
+_hero = html.Div([
+    html.Div("PATTERN MINING", className="page-hero-eyebrow"),
+    html.H1("Pola & Aturan Asosiasi"),
+    html.P("Kombinasi atribut yang sering muncul bersama, dibaca JIKA → MAKA. "
+           "Pakai filter sidebar untuk menyaring berdasarkan atribut, confidence, atau lift."),
+], className="page-hero")
 
-    make_filter_bar(PAGE, wilayah=False, segmen=False, jenis=False, search=True,
-                     search_placeholder="Cari atribut pola, mis. 'fraud', 'saldo', 'segmen 2'..."),
-
-    html.Div([
-        html.Span("Kelompok pola:", className="chip-row-label"),
-        html.Div(id=f"{PAGE}-group-chips", className="chip-row"),
-    ], className="chip-row-wrap"),
+layout = page_shell(PAGE, hero=_hero, filter_bar=make_filter_bar(
+    PAGE, jenis_tujuan=False, segmen=False, jenis=False,
+    rule_group=True, rule_attribute=True, rule_confidence=True, rule_lift=True,
+    search=True, search_placeholder="Cari teks pola (JIKA/MAKA)..."), content=[
 
     html.Div(id=f"{PAGE}-kpi-container"),
 
-    section_header("10 Pola Utama", "Diseleksi dari 135 pola berdasarkan kekuatan bisnis (lift & confidence) - lihat detail metodologi di README."),
-    html.Div(id=f"{PAGE}-top10-cards", className="rules-grid"),
-
-    section_header("Kekuatan Pola Utama (Lift)", "Lift = seberapa kuat kombinasi ini dibanding kejadian kebetulan. Lift 10x berarti 10x lebih sering dari yang diharapkan acak."),
-    html.Div([dcc.Graph(id=f"{PAGE}-lift-bar", config={"displayModeBar": False})], className="chart-card"),
-
+    section_header("Seberapa Kuat Pola yang Ditemukan & Bagaimana Atribut Terhubung",
+                   "Kiri: dari sekian pola, berapa yang benar-benar kuat: dan berapa yang mengarah ke penipuan (merah). "
+                   "Kanan: bagaimana atribut saling terhubung; garis dan titik merah berujung ke penipuan. Arahkan kursor ke titik untuk melihat nama atributnya."),
     html.Div([
         html.Div([
-            html.Div("Komposisi Kelompok Pola", className="chart-card-title"),
-            dcc.Graph(id=f"{PAGE}-group-donut", config={"displayModeBar": False}),
+            html.Div("Sebaran kekuatan pola", className="chart-card-title"),
+            dcc.Graph(id=f"{PAGE}-strength", config={"displayModeBar": False}),
         ], className="chart-card"),
         html.Div([
-            html.Div("Mengapa hanya 10 yang ditonjolkan?", className="chart-card-title"),
-            html.P(
-                "Menampilkan seluruh 135 pola sekaligus sebagai kartu besar akan membanjiri halaman dan "
-                "menyulitkan pengambilan keputusan cepat. 10 pola dengan kombinasi lift & relevansi bisnis "
-                "tertinggi ditonjolkan di atas; pola lain tetap tersimpan dan dapat dicari/diurutkan pada "
-                "tabel di bawah, ditandai 'Insight tambahan'.", className="segment-text",
-            ),
+            html.Div("Jaringan antar-atribut", className="chart-card-title"),
+            dcc.Graph(id=f"{PAGE}-network", config={"displayModeBar": False}),
         ], className="chart-card"),
     ], className="grid-2-equal"),
 
-    section_header("Seluruh Pola yang Ditemukan", "Cari atau filter berdasarkan kelompok/pencarian di atas - urutan default: pola utama dahulu, lalu lift tertinggi."),
+    section_header("Pola Terkuat",
+                   "10 pola terkuat yang cocok dengan pencarian & filtermu saat ini. "
+                   "Ubah filter di kiri, dan daftar ini ikut berubah menampilkan 10 teratas yang baru."),
+    html.Div(id=f"{PAGE}-count-banner", className="count-banner"),
+    html.Div(id=f"{PAGE}-top-cards", className="rules-ranked-list"),
+
+    section_header("Rekomendasi dari Pola Ini"),
+    html.Div(id=f"{PAGE}-recommendations", className="grid-2-equal"),
+
+    section_header("Semua Pola yang Cocok", "Bisa diurut & difilter lebih lanjut di tabel."),
     html.Div(id=f"{PAGE}-all-rules-table-wrap"),
+])
 
-    dcc.Store(id=f"{PAGE}-active-group", data=GROUP_ALL),
-], className="page-fade-in")
+sidebar_toggle_callback(PAGE)
 
 
-@callback(
-    Output(f"{PAGE}-active-group", "data"),
-    Output(f"{PAGE}-group-chips", "children"),
-    Input({"type": f"{PAGE}-chip", "index": dash.ALL}, "n_clicks"),
-    State(f"{PAGE}-active-group", "data"),
-)
-def _toggle_group(_n_clicks, current):
-    triggered = dash.ctx.triggered_id
-    active = triggered["index"] if triggered else (current or GROUP_ALL)
-    chips = [
-        html.Button(g, id={"type": f"{PAGE}-chip", "index": g}, n_clicks=0,
-                    className="chip" + (" chip-active" if g == active else ""))
-        for g in GROUP_CHOICES
-    ]
-    return active, chips
+def _rec_cards_for_group(active_group):
+    """Rekomendasi yang relevan dengan kelompok pola aktif (atau semua yg terkait pola)."""
+    recs = [r for r in cfg.RECOMMENDATIONS if r.get("related_rule_group")]
+    if active_group:
+        filtered = [r for r in recs if r["related_rule_group"] == active_group]
+        recs = filtered or recs
+    if not recs:
+        return [empty_state("Tidak ada rekomendasi spesifik untuk filter ini.")]
+    cards = []
+    for r in recs[:4]:
+        cards.append(html.Div([
+            html.Div([
+                html.Span(r["priority"], className=f"badge badge-{'danger' if r['priority']=='Tinggi' else 'warning' if r['priority']=='Sedang' else 'default'}"),
+                html.Span(r["category"], className="chip"),
+            ], className="rec-badges"),
+            html.H4(r["title"], className="rec-title"),
+            html.P(r["evidence"], className="segment-text rec-evidence"),
+        ], className="chart-card rec-card"))
+    return cards
 
 
 @callback(
     Output(f"{PAGE}-kpi-container", "children"),
-    Output(f"{PAGE}-top10-cards", "children"),
-    Output(f"{PAGE}-lift-bar", "figure"),
-    Output(f"{PAGE}-group-donut", "figure"),
+    Output(f"{PAGE}-strength", "figure"),
+    Output(f"{PAGE}-network", "figure"),
+    Output(f"{PAGE}-count-banner", "children"),
+    Output(f"{PAGE}-top-cards", "children"),
+    Output(f"{PAGE}-recommendations", "children"),
     Output(f"{PAGE}-all-rules-table-wrap", "children"),
-    Input(f"{PAGE}-active-group", "data"),
+    Input(f"{PAGE}-filter-rule-group", "value"),
+    Input(f"{PAGE}-filter-attr-jenis-transaksi", "value"),
+    Input(f"{PAGE}-filter-attr-segmen-atom", "value"),
+    Input(f"{PAGE}-filter-attr-nominal", "value"),
+    Input(f"{PAGE}-filter-attr-saldo-awal", "value"),
+    Input(f"{PAGE}-filter-attr-selisih-saldo", "value"),
+    Input(f"{PAGE}-filter-attr-status-kuras-atom", "value"),
+    Input(f"{PAGE}-filter-attr-tujuan-atom", "value"),
+    Input(f"{PAGE}-filter-attr-outlier-atom", "value"),
+    Input(f"{PAGE}-filter-attr-status-fraud", "value"),
+    Input(f"{PAGE}-filter-rule-confidence", "value"),
+    Input(f"{PAGE}-filter-rule-lift", "value"),
     Input(f"{PAGE}-filter-search", "value"),
 )
-def _update(active_group, search):
-    group_param = None if active_group in (None, GROUP_ALL) else active_group
+def _update(rule_group, a_type, a_seg, a_nom, a_saldo, a_selisih, a_kuras, a_tujuan, a_outlier, a_fraud,
+            min_conf, min_lift, search):
     search = search or ""
+    min_conf = (min_conf or 0) / 100.0
+    min_lift = min_lift or 0
+    attrs = []
+    for group_val in (a_type, a_seg, a_nom, a_saldo, a_selisih, a_kuras, a_tujuan, a_outlier, a_fraud):
+        if not group_val:
+            continue
+        if isinstance(group_val, list):
+            attrs.extend(group_val)
+        else:
+            attrs.append(group_val)
 
-    all_rules = BACKEND.get_rules(rule_group=group_param, search=search)
-    top10 = [r for r in all_rules if r.get("is_top10")]
-    all_for_chart = BACKEND.get_rules()  # tak difilter, utk donut komposisi keseluruhan yg stabil
+    rules = BACKEND.get_rules(
+        rule_group=rule_group or None, min_lift=min_lift, min_confidence=min_conf,
+        attribute=attrs[0] if attrs else None, search=search,
+    )
+    for a in attrs[1:]:
+        rules = [r for r in rules if a in (r.get("antecedents_str", "") + "," + r.get("consequents_str", ""))]
+
+    all_rules_unfiltered = BACKEND.get_rules()
 
     kpis = kpi_row([
-        dict(label="Total Pola Ditemukan", value=str(len(all_for_chart)), icon="🔗", tone="brand"),
-        dict(label="Pola Utama", value=str(len(BACKEND.get_rules(limit=10)) if not group_param else len(top10)),
-             icon="⭐", tone="warning", sublabel="ditonjolkan sbg kartu besar"),
-        dict(label="Cocok Filter Saat Ini", value=str(len(all_rules)), icon="🔎", tone="default"),
-        dict(label="Lift Tertinggi", value=cfg.format_multiplier(max((r["lift"] for r in all_rules), default=0)),
+        dict(label="Total Pola", value=str(len(all_rules_unfiltered)), icon="🔗", tone="brand"),
+        dict(label="Cocok Filter", value=str(len(rules)), icon="🔎", tone="default"),
+        dict(label="Lift Tertinggi", value=cfg.format_multiplier(max((r["lift"] for r in rules), default=0)),
              icon="📈", tone="success"),
+        dict(label="Confidence Tertinggi", value=cfg.format_pct(max((r["confidence"] for r in rules), default=0), 1),
+             icon="🎯", tone="warning"),
     ])
 
-    top10_cards = [rule_card(r) for r in (top10 or all_rules[:10])] if all_rules else [empty_state("Tidak ada pola yang cocok dengan pencarian/filter ini.")]
-    fig_lift = ch.rules_lift_bar(top10 or all_rules, top_n=10)
-    fig_donut = ch.rule_group_donut(all_for_chart)
+    fig_strength = ch.rules_strength_summary(rules)
+    fig_network = ch.rules_network(rules)
+
+    top_cards = [ranked_rule_card(r, i + 1) for i, r in enumerate(rules[:10])] if rules else [empty_state("Tidak ada pola yang cocok dengan filter ini. Coba longgarkan confidence/lift atau ubah atribut.")]
+
+    n_match = len(rules)
+    n_shown = min(10, n_match)
+    n_total = len(all_rules_unfiltered)
+    is_filtered = (n_match != n_total)
+    if n_match == 0:
+        banner = None
+    elif is_filtered:
+        banner = html.Div([
+            html.Span(f"Menampilkan {n_shown} teratas dari {n_match:,} pola", className="count-strong"),
+            html.Span(f" yang cocok filter (total {n_total:,} pola).", className="count-soft"),
+        ])
+    else:
+        banner = html.Div([
+            html.Span(f"Menampilkan {n_shown} teratas dari {n_total:,} pola", className="count-strong"),
+            html.Span(" (belum ada filter aktif).", className="count-soft"),
+        ])
+
+    rec_cards = _rec_cards_for_group(rule_group or None)
 
     table_rows = [
-        {
-            "Status": r.get("penting", ""),
-            "Kelompok": r["rule_group"],
-            "JIKA": r["when_text"],
-            "MAKA": r["then_text"],
-            "Coverage": r["coverage_fmt"],
-            "Confidence": r["confidence_fmt"],
-            "Lift": r["lift_fmt"],
-        }
-        for r in all_rules
+        {"Status": r.get("penting", ""), "Kelompok": r["rule_group"], "JIKA": r["when_text"],
+         "MAKA": r["then_text"], "Coverage": r["coverage_fmt"], "Confidence": r["confidence_fmt"], "Lift": r["lift_fmt"]}
+        for r in rules
     ]
     table = html.Div(dash_table.DataTable(
         data=table_rows,
         columns=[{"name": c, "id": c} for c in ["Status", "Kelompok", "JIKA", "MAKA", "Coverage", "Confidence", "Lift"]],
-        page_size=15,
-        sort_action="native",
-        filter_action="native",
+        page_size=15, sort_action="native", filter_action="native",
         style_table={"overflowX": "auto"},
         style_cell={"fontFamily": "Inter, sans-serif", "fontSize": "13px", "padding": "10px 12px",
                     "textAlign": "left", "whiteSpace": "normal", "height": "auto", "maxWidth": "320px"},
         style_header={"backgroundColor": "#122A52", "color": "white", "fontWeight": "600", "textTransform": "uppercase", "fontSize": "11px"},
-        style_data_conditional=[
-            {"if": {"filter_query": '{Status} = "Insight utama"'}, "backgroundColor": "#FBEDD4"},
-        ],
-    ), className="fance-table") if table_rows else empty_state("Tidak ada pola yang cocok.")
+        style_data_conditional=[{"if": {"filter_query": '{Status} = "Insight utama"'}, "backgroundColor": "#FBEDD4"}],
+    ), className="paysim-table") if table_rows else empty_state("Tidak ada pola yang cocok.")
 
-    return kpis, top10_cards, fig_lift, fig_donut, table
+    return kpis, fig_strength, fig_network, banner, top_cards, rec_cards, table

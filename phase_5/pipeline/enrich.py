@@ -6,13 +6,14 @@ Fungsi transformasi "lapisan presentasi" yang dipakai pipeline/flow.py.
 PENTING - batas tanggung jawab: modul ini TIDAK menghitung ulang clustering,
 association rules, atau anomaly detection (itu tugas Phase 2-4 kelompok yang
 sudah selesai dan HASILNYA dianggap final/benar). Modul ini HANYA menambah
-lapisan presentasi di atas hasil tsb: label Indonesia, dimensi wilayah
-(spasial ilustratif), teks alasan anomali, dan penggabungan pool aturan
+lapisan presentasi di atas hasil tsb: label Indonesia, dimensi filter
+kategorikal TAMBAHAN yang diturunkan dari kolom asli (isDestMerchant,
+origDrainedToZero - lihat catatan di config.py kenapa TIDAK ada dimensi
+spasial/temporal buatan), teks alasan anomali, dan penggabungan pool aturan
 asosiasi - supaya angka hasil analisis asli tidak pernah diubah/ditimpa.
 """
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import Optional
 
@@ -21,38 +22,35 @@ import pandas as pd
 
 import config as cfg
 
-WILAYAH_BASE_W = np.array([0.22, 0.15, 0.12, 0.14, 0.18, 0.08, 0.07, 0.04])
 
+def derive_dest_type(df: pd.DataFrame) -> pd.Series:
+    """'Merchant' / 'Nasabah' - langsung dari kolom isDestMerchant asli
+    (diturunkan Phase 1 dari prefix ID tujuan: M=merchant, C=customer).
+    Bukan dimensi buatan - ini atribut yang sudah ada di data.
 
-def assign_wilayah(df: pd.DataFrame, seed: int = 42) -> pd.Series:
-    """Tempelkan dimensi 'wilayah' (spasial ILUSTRATIF, lihat WILAYAH_DISCLOSURE
-    di config.py) secara deterministik: hash dari kombinasi kolom numerik yang
-    ada pada baris itu sendiri (bukan indeks baris) supaya hasilnya stabil
-    walau urutan baris berubah, dan tidak bergantung pada kolom ID apa pun
-    (nameOrig/nameDest sudah didrop sejak Phase 1).
-    """
-    cols_for_hash = [c for c in ["amount", "oldbalanceOrg", "oldbalanceDest", "origError", "destError", "step"]
-                      if c in df.columns]
-    if not cols_for_hash:
-        basis = pd.Series(np.arange(len(df)))
+    Kebal tipe: isDestMerchant bisa berupa bool (True/False), int (1/0), atau
+    string ('1'/'0'/'True'/'M'). Semua diperlakukan benar - kalau dulu hanya
+    menangani bool, nilai integer/string bikin SEMUA jadi 'Nasabah' (Merchant
+    hilang dari filter)."""
+    if "isDestMerchant" not in df.columns:
+        return pd.Series(cfg.DEST_TYPE_LIST[1], index=df.index)
+    col = df["isDestMerchant"]
+    if col.dtype == bool:
+        is_merchant = col
+    elif pd.api.types.is_numeric_dtype(col):
+        is_merchant = col.fillna(0).astype(int) == 1
     else:
-        basis = df[cols_for_hash].astype(str).agg("|".join, axis=1)
+        s = col.astype(str).str.strip().str.lower()
+        is_merchant = s.isin(["true", "1", "1.0", "m", "merchant", "yes", "y"])
+    return pd.Series(np.where(is_merchant, "Merchant", "Nasabah"), index=df.index)
 
-    def _hash_to_unit(s: str) -> float:
-        h = hashlib.md5(f"{seed}|{s}".encode()).hexdigest()
-        return int(h[:8], 16) / 0xFFFFFFFF
 
-    u = basis.apply(_hash_to_unit).values
-    # sedikit pemiringan berdasar segmen supaya pola spasial ada saat difilter
-    # (murni utk demo interaktivitas - lihat WILAYAH_DISCLOSURE)
-    tilt = np.ones(len(df))
-    if "cluster_kmeans" in df.columns:
-        tilt = np.where(df["cluster_kmeans"].values == 0, 1.4, 1.0)
-    u = (u * tilt) % 1.0
-    edges = np.cumsum(WILAYAH_BASE_W / WILAYAH_BASE_W.sum())
-    idx = np.searchsorted(edges, u)
-    idx = np.clip(idx, 0, len(cfg.WILAYAH_LIST) - 1)
-    return pd.Series(np.array(cfg.WILAYAH_LIST)[idx], index=df.index)
+def derive_drain_status(df: pd.DataFrame) -> pd.Series:
+    """'Terkuras Habis' / 'Tidak Terkuras' - langsung dari kolom origDrainedToZero
+    asli (saldo pengirim jadi 0 setelah transaksi). Bukan dimensi buatan."""
+    if "origDrainedToZero" not in df.columns:
+        return pd.Series(cfg.DRAIN_STATUS_LIST[1], index=df.index)
+    return df["origDrainedToZero"].map({True: "Terkuras Habis", False: "Tidak Terkuras"}).fillna("Tidak Terkuras")
 
 
 def translate_categories(df: pd.DataFrame) -> pd.DataFrame:
@@ -112,6 +110,64 @@ def ensure_transaction_id(df: pd.DataFrame) -> pd.Series:
     return pd.Series([f"TX{i:08d}" for i in range(len(df))], index=df.index)
 
 
+def derive_anomaly_type(df: pd.DataFrame) -> pd.Series:
+    """Turunkan 'anomaly_type' dari kolom flag_* ketika phase 4 tidak
+    mengekspornya. Logika mengikuti definisi di config.ANOMALY_TYPE_LABELS:
+    - tidak ada flag -> Tidak Ada Anomali Statistik
+    - >=3 metode menandai -> Banyak Indikator Sekaligus
+    - IsoForest + HDBSCAN -> Perilaku & Struktur Klaster Menyimpang
+    - HDBSCAN saja -> Klaster Menyimpang (Outlier)
+    - IsoForest saja -> Perilaku Menyimpang (Outlier)
+    - BalanceMismatch dominan -> Ketidaksesuaian Saldo
+    - IQR/ZScore (nominal) -> Nominal Transaksi Ekstrem
+    """
+    import numpy as np
+    n = len(df)
+    zero = pd.Series(0, index=df.index)
+    iqr = df["flag_IQR"].astype(int) if "flag_IQR" in df.columns else zero
+    zsc = df["flag_ZScore"].astype(int) if "flag_ZScore" in df.columns else zero
+    iso = df["flag_IsoForest"].astype(int) if "flag_IsoForest" in df.columns else zero
+    hdb = df["flag_HDBSCAN"].astype(int) if "flag_HDBSCAN" in df.columns else zero
+    bal = df["flag_BalanceMismatch"].astype(int) if "flag_BalanceMismatch" in df.columns else zero
+
+    total = iqr + zsc + iso + hdb
+    out = np.full(n, "Tidak Ada Anomali Statistik", dtype=object)
+    out = np.where((iqr | zsc).astype(bool) & (out == "Tidak Ada Anomali Statistik"),
+                   "Nominal Transaksi Ekstrem", out)
+    out = np.where(bal.astype(bool) & ~(iso | hdb).astype(bool),
+                   "Ketidaksesuaian Saldo", out)
+    out = np.where(iso.astype(bool) & (out != "Banyak Indikator Sekaligus"),
+                   "Perilaku Menyimpang (Outlier)", out)
+    out = np.where(hdb.astype(bool) & (out != "Banyak Indikator Sekaligus"),
+                   "Klaster Menyimpang (Outlier)", out)
+    out = np.where((iso & hdb).astype(bool),
+                   "Perilaku & Struktur Klaster Menyimpang", out)
+    out = np.where(total >= 3, "Banyak Indikator Sekaligus", out)
+    return pd.Series(out, index=df.index)
+
+
+def derive_investigation_category(df: pd.DataFrame) -> pd.Series:
+    """Turunkan 'investigation_category' dari risk_score + isFraud + flags saat
+    phase 4 tidak mengekspornya (config.INVESTIGATION_CATEGORY_LABELS)."""
+    import numpy as np
+    n = len(df)
+    score = df["risk_score"] if "risk_score" in df.columns else pd.Series(0, index=df.index)
+    fraud = df["isFraud"].astype(bool) if "isFraud" in df.columns else pd.Series(False, index=df.index)
+    zero = pd.Series(0, index=df.index)
+    bal = df["flag_BalanceMismatch"].astype(int) if "flag_BalanceMismatch" in df.columns else zero
+    iso = df["flag_IsoForest"].astype(int) if "flag_IsoForest" in df.columns else zero
+    hdb = df["flag_HDBSCAN"].astype(int) if "flag_HDBSCAN" in df.columns else zero
+
+    out = np.full(n, "Normal / Perlu Perhatian Rendah", dtype=object)
+    out = np.where(bal.astype(bool) & ~(iso | hdb).astype(bool),
+                   "Kemungkinan Masalah Kualitas Data", out)
+    out = np.where(score >= cfg.HIGH_RISK_THRESHOLD, "Berpotensi Perlu Dipantau", out)
+    out = np.where(score >= cfg.CRITICAL_RISK_THRESHOLD, "Berpotensi Fraud", out)
+    out = np.where((score >= cfg.CRITICAL_RISK_THRESHOLD) & (~fraud),
+                   "Transaksi Sah yang Jarang Terjadi", out)
+    return pd.Series(out, index=df.index)
+
+
 def standardize_schema(df: pd.DataFrame) -> pd.DataFrame:
     """Selaraskan nama kolom dari output Phase 1-4 asli (mis. 'type') ke skema
     yang dipakai dashboard ('transaction_type'). Aman dipanggil di data apa pun.
@@ -119,26 +175,32 @@ def standardize_schema(df: pd.DataFrame) -> pd.DataFrame:
     referensi frame yang aman dimodifikasi (baru dibaca dari parquet/CSV)."""
     rename_map = {"type": "transaction_type"}
     df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns and v not in df.columns})
+    if "transaction_type" not in df.columns:
+        onehot = [c for c in df.columns if c.startswith("type_")]
+        if onehot:
+            df["transaction_type"] = (
+                df[onehot].idxmax(axis=1).str.replace("type_", "", regex=False)
+            )
     if "high_risk" not in df.columns and "risk_score" in df.columns:
         hdb = df["flag_HDBSCAN"] if "flag_HDBSCAN" in df.columns else 0
         df["high_risk"] = (df["risk_score"] >= cfg.HIGH_RISK_THRESHOLD) | (hdb == 1)
-    if "wilayah" not in df.columns:
-        df["wilayah"] = assign_wilayah(df)
+    if "jenis_tujuan" not in df.columns:
+        df["jenis_tujuan"] = derive_dest_type(df)
+    if "status_kuras" not in df.columns:
+        df["status_kuras"] = derive_drain_status(df)
     if "transaction_id" not in df.columns:
         df["transaction_id"] = ensure_transaction_id(df)
     df = translate_categories(df)
-    if "anomaly_reason" not in df.columns and all(
-        c in df.columns for c in ["flag_IQR", "flag_ZScore", "flag_IsoForest", "flag_HDBSCAN"]
-    ):
+    _has_flags = all(c in df.columns for c in ["flag_IQR", "flag_ZScore", "flag_IsoForest", "flag_HDBSCAN"])
+    if "anomaly_reason" not in df.columns and _has_flags:
         df["anomaly_reason"] = compute_anomaly_reason(df)
+    if "anomaly_type" not in df.columns and _has_flags:
+        df["anomaly_type"] = derive_anomaly_type(df)
+    if "investigation_category" not in df.columns and ("risk_score" in df.columns):
+        df["investigation_category"] = derive_investigation_category(df)
     return df
 
 
-# ---------------------------------------------------------------------------
-# Pool aturan asosiasi: gabungkan file top-10 (final) dengan pool yang lebih
-# besar (report_worthy_rules.csv / fraud_focused_rules.csv) kalau tersedia,
-# supaya fitur "10 utama + selebihnya tetap bisa diakses" punya isi yang nyata.
-# ---------------------------------------------------------------------------
 RULE_FILE_CANDIDATES_TOP10 = ["top_10_final_rules.csv", "top_rules_business.csv"]
 RULE_FILE_CANDIDATES_POOL = ["report_worthy_rules.csv", "fraud_focused_rules.csv", "meaningful_rules.csv"]
 

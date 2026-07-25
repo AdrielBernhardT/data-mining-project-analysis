@@ -28,7 +28,7 @@ CARA PAKAI
    asli (lihat tools/generate_synthetic_data.py) - PENTING dipakai HANYA
    untuk uji coba dashboard, bukan pengganti data asli kelompok.
 
-Kedua mode berakhir di artefak yang sama: data/fance_dashboard.duckdb (selalu
+Kedua mode berakhir di artefak yang sama: data/paysim_dashboard.duckdb (selalu
 ditulis) + index Elasticsearch (ditulis best-effort kalau ELASTICSEARCH_URL
 bisa dihubungi; pipeline TIDAK gagal total kalau Elasticsearch mati).
 """
@@ -75,7 +75,7 @@ REAL_TOP10_FALLBACK = pd.DataFrame([
 ])
 
 CUBE_GROUP_COLS = [
-    "wilayah", "transaction_type", "cluster_kmeans", "isFraud",
+    "jenis_tujuan", "status_kuras", "transaction_type", "cluster_kmeans", "isFraud",
     "flag_IQR", "flag_ZScore", "flag_IsoForest", "flag_HDBSCAN", "flag_BalanceMismatch",
     "risk_score", "risk_level", "anomaly_type", "investigation_category", "high_risk",
 ]
@@ -96,9 +96,9 @@ def load_transaction_data(mode: str, data_root: Optional[str], synthetic_path: O
 
     root = Path(data_root)
     full_candidates = [
-        root / "phase_4" / "paysim_full_scored.parquet",
-        root / "phase_4" / "full_scored_transactions.parquet",
-        root / "data" / "paysim_full_scored.parquet",
+        root / "datasets" /  "phase_4" / "paysim_full_scored.parquet",
+        root / "datasets" / "phase_4" / "full_scored_transactions.parquet",
+        root / "datasets" / "data" / "paysim_full_scored.parquet",
     ]
     source_path = None
     for p in full_candidates:
@@ -122,13 +122,34 @@ def load_transaction_data(mode: str, data_root: Optional[str], synthetic_path: O
                 "gunakan --mode synthetic untuk data uji."
             )
 
-    logger.info("[mode=real] Menerapkan lapisan presentasi (wilayah, label ID, alasan anomali) ...")
+    logger.info("[mode=real] Menerapkan lapisan presentasi (tipe tujuan, status kuras, label ID, alasan anomali) ...")
     df = standardize_schema(pd.read_parquet(source_path))
     out_path = Path(work_dir) / "transaksi_enriched.parquet"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(out_path, index=False)
     del df
     return str(out_path)
+
+
+def find_projection_path(mode: str, data_root: Optional[str], synthetic_path: Optional[str]) -> Optional[str]:
+    """Cari file segment_projection.parquet (koordinat UMAP/t-SNE untuk scatter
+    segmen). Dikembalikan None kalau tidak ada - dashboard tetap jalan, hanya
+    scatter segmen yang nonaktif. File dibuat oleh tools/build_segment_projection.py."""
+    candidates = []
+    if mode == "real" and data_root:
+        root = Path(data_root)
+        candidates += [
+            root / "datasets" / "phase_4" / "segment_projection.parquet",
+            root / "datasets" / "phase_2" / "segment_projection.parquet",
+            root / "datasets" / "data" / "segment_projection.parquet",
+        ]
+    if synthetic_path:
+        candidates.append(Path(synthetic_path).parent / "segment_projection.parquet")
+    candidates.append(Path(__file__).resolve().parent.parent / "data" / "segment_projection.parquet")
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    return None
 
 
 @task(log_prints=True)
@@ -143,7 +164,21 @@ def load_rule_pool_task(mode: str, data_root: Optional[str]) -> pd.DataFrame:
         return _merge_mined(mined, logger)
 
     root = Path(data_root)
-    return build_rule_pool(phase3_dir=root / "phase_3", top10_fallback=REAL_TOP10_FALLBACK, logger=logger)
+    pool_names = ["report_worthy_rules.csv", "fraud_focused_rules.csv", "meaningful_rules.csv"]
+    phase3_candidates = [
+        root / "datasets" / "phase_3",
+        root / "phase_3",
+    ]
+    phase3_dir = None
+    for cand in phase3_candidates:
+        if cand.exists() and any((cand / n).exists() for n in pool_names):
+            phase3_dir = cand
+            break
+    if phase3_dir is None:
+        phase3_dir = next((c for c in phase3_candidates if c.exists()), phase3_candidates[0])
+        logger.info(f"  [PERINGATAN] tak menemukan file pool di kandidat mana pun; memakai {phase3_dir}")
+    logger.info(f"  mencari pool pola di: {phase3_dir}")
+    return build_rule_pool(phase3_dir=phase3_dir, top10_fallback=REAL_TOP10_FALLBACK, logger=logger)
 
 
 def synthetic_path_default() -> str:
@@ -175,7 +210,8 @@ def _merge_mined(mined: pd.DataFrame, logger) -> pd.DataFrame:
 
 
 @task(log_prints=True)
-def write_duckdb(transaksi_path: str, rules: pd.DataFrame, db_path: str) -> dict:
+def write_duckdb(transaksi_path: str, rules: pd.DataFrame, db_path: str,
+                 projection_path: Optional[str] = None) -> dict:
     logger = get_run_logger()
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     if Path(db_path).exists():
@@ -189,7 +225,7 @@ def write_duckdb(transaksi_path: str, rules: pd.DataFrame, db_path: str) -> dict
     logger.info("  [checkpoint] tabel transaksi selesai ditulis")
     cols_present = set(con.execute("SELECT * FROM transaksi LIMIT 0").description and
                         [d[0] for d in con.execute("SELECT * FROM transaksi LIMIT 0").description])
-    for col in ["wilayah", "transaction_type", "risk_level", "anomaly_type", "investigation_category", "transaction_id"]:
+    for col in ["jenis_tujuan", "status_kuras", "transaction_type", "risk_level", "anomaly_type", "investigation_category", "transaction_id"]:
         if col in cols_present:
             con.execute(f"CREATE INDEX idx_{col} ON transaksi ({col})")
     if "risk_score" in cols_present:
@@ -201,6 +237,15 @@ def write_duckdb(transaksi_path: str, rules: pd.DataFrame, db_path: str) -> dict
     con.register("rules_view", rules)
     con.execute("CREATE TABLE pola AS SELECT * FROM rules_view")
 
+    n_projection = 0
+    if projection_path and Path(projection_path).exists():
+        con.execute("CREATE TABLE projection AS SELECT * FROM read_parquet(?)", [projection_path])
+        n_projection = con.execute("SELECT COUNT(*) FROM projection").fetchone()[0]
+        logger.info(f"  [checkpoint] tabel projection dimuat: {n_projection:,} titik dari {projection_path}")
+    else:
+        logger.info("  [checkpoint] tidak ada segment_projection.parquet - scatter segmen dinonaktifkan "
+                    "(jalankan tools/build_segment_projection.py untuk mengaktifkan)")
+
     group_cols_present = [c for c in CUBE_GROUP_COLS if c in cols_present]
     group_sql = ", ".join(group_cols_present)
     logger.info(f"  [checkpoint] mulai bangun cube (group by {len(group_cols_present)} kolom) ...")
@@ -210,7 +255,7 @@ def write_duckdb(transaksi_path: str, rules: pd.DataFrame, db_path: str) -> dict
         FROM transaksi GROUP BY {group_sql}
     """)
     logger.info("  [checkpoint] cube selesai dibangun")
-    for col in ["wilayah", "transaction_type", "cluster_kmeans", "risk_level"]:
+    for col in ["jenis_tujuan", "status_kuras", "transaction_type", "cluster_kmeans", "risk_level"]:
         if col in group_cols_present:
             con.execute(f"CREATE INDEX idx_cube_{col} ON cube ({col})")
 
@@ -218,8 +263,8 @@ def write_duckdb(transaksi_path: str, rules: pd.DataFrame, db_path: str) -> dict
     n_cube = con.execute("SELECT COUNT(*) FROM cube").fetchone()[0]
     n_pola = con.execute("SELECT COUNT(*) FROM pola").fetchone()[0]
     con.close()
-    logger.info(f"DuckDB ditulis: {db_path} | transaksi={n_transaksi:,} cube={n_cube:,} pola={n_pola}")
-    return dict(n_transaksi=n_transaksi, n_cube=n_cube, n_pola=n_pola)
+    logger.info(f"DuckDB ditulis: {db_path} | transaksi={n_transaksi:,} cube={n_cube:,} pola={n_pola} projection={n_projection:,}")
+    return dict(n_transaksi=n_transaksi, n_cube=n_cube, n_pola=n_pola, n_projection=n_projection)
 
 
 @task(log_prints=True)
@@ -237,7 +282,7 @@ def index_elasticsearch(db_path: str, es_url: str) -> dict:
         return {"status": "skipped", "reason": "package elasticsearch tidak terpasang"}
 
     import logging as _logging
-    _logging.getLogger("elastic_transport").setLevel(_logging.CRITICAL)  # redam log retry yg berisik saat ES belum nyala
+    _logging.getLogger("elastic_transport").setLevel(_logging.CRITICAL)
 
     try:
         client = Elasticsearch(es_url, request_timeout=2, max_retries=0)
@@ -293,18 +338,19 @@ def phase5_pipeline(
     mode: str = "synthetic",
     data_root: Optional[str] = None,
     synthetic_path: str = str(Path(__file__).resolve().parent.parent / "data" / "raw_synthetic" / "synthetic_transactions.parquet"),
-    db_path: str = str(Path(__file__).resolve().parent.parent / "data" / "fance_dashboard.duckdb"),
+    db_path: str = str(Path(__file__).resolve().parent.parent / "data" / "paysim_dashboard.duckdb"),
     manifest_path: str = str(Path(__file__).resolve().parent.parent / "data" / "manifest.json"),
     work_dir: str = str(Path(__file__).resolve().parent.parent / "data" / "_work"),
     es_url: Optional[str] = None,
 ):
     logger = get_run_logger()
-    logger.info(f"=== Pipeline Phase 5 (Kelompok Fance) - mode={mode} ===")
+    logger.info(f"=== Pipeline Phase 5 (Paysim) - mode={mode} ===")
     es_url = es_url or cfg.ELASTICSEARCH_URL
 
     transaksi_path = load_transaction_data(mode, data_root, synthetic_path, work_dir)
     rules = load_rule_pool_task(mode, data_root)
-    db_stats = write_duckdb(transaksi_path, rules, db_path)
+    projection_path = find_projection_path(mode, data_root, synthetic_path)
+    db_stats = write_duckdb(transaksi_path, rules, db_path, projection_path)
     es_stats = index_elasticsearch(db_path, es_url)
     write_manifest(db_stats, es_stats, mode, manifest_path)
     logger.info("=== Pipeline selesai ===")
@@ -312,7 +358,7 @@ def phase5_pipeline(
 
 
 def _parse_args():
-    p = argparse.ArgumentParser(description="Pipeline Phase 5 - Dashboard Kelompok Fance")
+    p = argparse.ArgumentParser(description="Pipeline Phase 5 - Dashboard Paysim")
     p.add_argument("--mode", choices=["real", "synthetic"], default="synthetic")
     p.add_argument("--data-root", default=None, help="Folder root project Phase 1-4 asli (mode=real)")
     p.add_argument("--es-url", default=None)

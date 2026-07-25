@@ -1,4 +1,4 @@
-# Dashboard Deteksi Fraud Perbankan — Kelompok Fance (Phase 5)
+# Dashboard Deteksi Fraud Perbankan Paysim (Phase 5)
 
 Dashboard interaktif berbasis Python Dash untuk hasil Data Mining Project Phase 1-4
 (preprocessing → segmentasi KMeans → pola asosiasi → deteksi anomali) di atas dataset
@@ -12,7 +12,7 @@ dan backend Elasticsearch + DuckDB.
 3. [Mengaktifkan Elasticsearch](#3-mengaktifkan-elasticsearch)
 4. [Arsitektur](#4-arsitektur)
 5. [Performa (<100ms) — Apa yang Sudah Diuji](#5-performa-100ms--apa-yang-sudah-diuji)
-6. [Tentang Dimensi "Wilayah" (Spasial)](#6-tentang-dimensi-wilayah-spasial)
+6. [Dimensi Filter: Kenapa Bukan Wilayah/Waktu](#6-dimensi-filter-kenapa-bukan-wilayahwaktu)
 7. [Checklist Catatan Dosen → Perubahan](#7-checklist-catatan-dosen--perubahan)
 8. [Batasan & Hal yang Perlu Diketahui](#8-batasan--hal-yang-perlu-diketahui)
 9. [Struktur Folder](#9-struktur-folder)
@@ -97,15 +97,15 @@ apa pun (lihat `pilih_backend()` di `app.py`).
 ```
                      ┌──────────────────────┐
  Phase 1-4 (asli) →  │ pipeline/flow.py      │  (Prefect @flow/@task, sama gaya dgn Phase 1-4)
- atau data sintetis  │  - enrich.py          │  label ID, dimensi wilayah, gabung pool pola
+ atau data sintetis  │  - enrich.py          │  label ID, tipe tujuan/status kuras, gabung pool pola
                      │  - es_indexer.py      │  mapping index & bulk indexing
                      └──────────┬───────────┘
                                 │  tulis
                  ┌──────────────┴───────────────┐
                  ▼                              ▼
-      data/fance_dashboard.duckdb      Elasticsearch (opsional, best-effort)
-        - tabel `transaksi` (6,3jt)      - index fance_transaksi
-        - tabel `cube` (~1.700 baris     - index fance_pola_asosiasi
+      data/paysim_dashboard.duckdb      Elasticsearch (opsional, best-effort)
+        - tabel `transaksi` (6,3jt)      - index paysim_transaksi
+        - tabel `cube` (~1.700 baris     - index paysim_pola_asosiasi
           pra-agregasi utk KPI instan)
         - tabel `pola` (135 pola)
                  │                              │
@@ -134,9 +134,9 @@ dari laptop biasa) memakai `data_backend/duckdb_backend.py:benchmark()` atas
 | Skenario | Median | Keterangan |
 |---|---|---|
 | KPI tanpa filter | ~1-3 ms | via tabel `cube` |
-| KPI dgn filter wilayah+segmen+risiko | ~1-3 ms | via tabel `cube` |
-| Ringkasan segmen / wilayah / overlap metode | ~1-4 ms | via tabel `cube` |
-| Cari transaksi (filter kategorikal, tanpa teks) | ~10-60 ms | tabel `transaksi`, pakai indeks |
+| KPI dgn filter tipe tujuan+segmen+risiko | ~1-3 ms | via tabel `cube` |
+| Ringkasan segmen / tipe tujuan / overlap metode | ~1-4 ms | via tabel `cube` |
+| Cari transaksi (filter kategorikal, tanpa teks) | ~6-180 ms | tabel `transaksi`, pakai indeks - makin banyak filter kategorikal dikombinasikan sekaligus, makin mendekati batas atas |
 | Cari berdasarkan ID transaksi persis | ~1-6 ms | tabel `transaksi`, indeks unik |
 | Cari kata kunci metode (mis. "hdbscan") | ~15-30 ms | diterjemahkan ke filter boolean ber-indeks |
 | Cari teks bebas tak dikenal (ILIKE substring) | **~500-800 ms** | lihat catatan di bawah |
@@ -153,26 +153,40 @@ pengembangan ini) karena DuckDB memparalelkan pemindaian kolom.
 Halaman Jelajah Data menampilkan **latensi query yang sesungguhnya** (bukan angka
 di atas kertas) tiap kali kalian mengubah filter - lihat badge ⚡ di halaman tsb.
 
-## 6. Tentang Dimensi "Wilayah" (Spasial)
+## 6. Dimensi Filter: Kenapa Bukan Wilayah/Waktu
 
-Dataset PaySim asli **tidak memiliki atribut geografis apa pun** (11 kolom asli:
-step, type, amount, nameOrig, oldbalanceOrg, newbalanceOrig, nameDest, oldbalanceDest,
-newbalanceDest, isFraud, isFlaggedFraud — sudah dicek di seluruh kode Phase 1-4,
-tidak ada kolom lokasi/negara/wilayah sama sekali). Sesuai arahan dosen ("spatio aja
-gausah temporal karena di dataset kita gaada temporal atribute"), pipeline menempelkan
-kolom **`wilayah`** yang:
+Setelah dicek ulang, dataset PaySim ini **tidak memiliki atribut geografis maupun
+temporal yang bermakna** (11 kolom asli: step, type, amount, nameOrig, oldbalanceOrg,
+newbalanceOrig, nameDest, oldbalanceDest, newbalanceDest, isFraud, isFlaggedFraud —
+sudah dicek di seluruh kode Phase 1-4, tidak ada kolom lokasi/negara/wilayah maupun
+tanggal kalender sama sekali; kolom `step` hanyalah jam simulasi relatif 1-743,
+bukan tanggal sungguhan). Versi sebelumnya dari dashboard ini sempat menambahkan
+kolom "wilayah" ilustratif (hasil hash, bukan data asli) untuk mendemonstrasikan
+slicing spasial - **ini sudah dihapus total** atas arahan kelompok, supaya tidak
+ada satu pun angka di dashboard yang berasal dari data karangan.
 
-- **Deterministik**: diturunkan dari hash kombinasi atribut transaksi yang sudah ada
-  (nominal, saldo, dll - lihat `pipeline/enrich.py:assign_wilayah()`), BUKAN acak
-  murni, dan akan selalu sama tiap pipeline dijalankan ulang pada data yang sama.
-- **Ilustratif**, bukan data lokasi asli - ini ditampilkan secara transparan di
-  dashboard (lihat footer & `config.WILAYAH_DISCLOSURE`) supaya bisa dijelaskan
-  apa adanya ke dosen: dashboard MAMPU melakukan slicing spasial (sesuai arahan),
-  namun dataset PaySim memang tidak membawa geografi asli untuk didemonstrasikan.
-- **Mudah diganti**: kalau kelompok mendapat/membuat atribut wilayah yang lebih
-  sahih di kemudian hari, cukup pastikan kolom `wilayah` tersedia sebelum data
-  masuk ke `pipeline/flow.py` - fungsi `assign_wilayah` otomatis dilewati kalau
-  kolom itu sudah ada (lihat `pipeline/enrich.py:standardize_schema`).
+Sebagai gantinya, filter/slicer di seluruh dashboard memakai dimensi yang **100%
+diturunkan langsung dari atribut yang sungguh-sungguh ada** di data:
+
+| Dimensi filter | Sumber kolom asli | Keterangan |
+|---|---|---|
+| Segmen | `cluster_kmeans` (Phase 2) | Hasil KMeans clustering |
+| Jenis transaksi | `type` (PaySim asli) | CASH_IN/CASH_OUT/DEBIT/PAYMENT/TRANSFER |
+| **Tipe tujuan** | `isDestMerchant` (Phase 1, dari prefix ID tujuan asli M/C) | Merchant vs Nasabah perorangan |
+| **Status saldo** | `origDrainedToZero` (Phase 1) | Saldo pengirim terkuras habis jadi 0 atau tidak |
+| Level risiko / jenis anomali / kategori investigasi | Phase 4 | Hasil deteksi anomali |
+
+Dua dimensi yang dicetak tebal (`jenis_tujuan`, `status_kuras`) adalah pengganti slot
+yang dulu diisi "wilayah" - keduanya dipilih karena secara bisnis relevan untuk kasus
+fraud (mis. "apakah pola tertentu lebih sering ke akun merchant atau nasabah?", "apakah
+transaksi yang menguras saldo habis punya profil risiko berbeda?") dan, yang terpenting,
+**bukan rekayasa** - lihat `pipeline/enrich.py:derive_dest_type()` dan `derive_drain_status()`
+yang isinya cuma pemetaan boolean→label, tanpa hash atau angka acak apa pun.
+
+Kalau suatu saat dataset kalian mendapat atribut spasial/temporal asli (mis. cabang,
+region, atau tanggal transaksi sungguhan), tinggal tambahkan kolom tsb sebelum masuk
+`pipeline/flow.py`, lalu tambahkan satu filter baru di `components/filter_bar.py`
+mengikuti pola `jenis_tujuan`/`status_kuras` yang sudah ada.
 
 ## 7. Checklist Catatan Dosen → Perubahan
 
@@ -180,16 +194,16 @@ kolom **`wilayah`** yang:
 |---|---|---|
 | 1 | Customer segments ada yang ga keliatan di grafiknya | `population_share_bar` pakai skala **log** + label angka selalu tampil di ujung bar (Segmen 0 = 0,03% tetap terbaca) |
 | 2 | Karakteristik segmen | Radar chart multi-metrik (`segment_radar`) + rincian per segmen di kartu |
-| 3 | Tambahkan grafik di segmen, jangan teks doang | 4 grafik (populasi, radar, risiko, peta populasi-risiko) + sebaran wilayah, semua ikut ter-highlight saat kartu segmen diklik |
+| 3 | Tambahkan grafik di segmen, jangan teks doang | 4 grafik (populasi, radar, risiko, peta populasi-risiko) + sebaran tipe tujuan, semua ikut ter-highlight saat kartu segmen diklik |
 | 4 | Pattern recommendation lebih detail, tambahkan rekomendasi di halaman pattern | Tiap pola punya field `recommendation` (aksi bisnis konkret) ditampilkan di kartu, terpisah dari `takeaway` |
 | 5 | Justifikasi kenapa pakai anomali | Section "Mengapa Memakai 5 Metode Sekaligus?" di halaman Anomali, didukung angka nyata kajian tumpang-tindih metode |
 | 6 | Setiap page minimal ada slicer | Semua 6 halaman punya filter bar fungsional (bukan pajangan) - lihat `components/filter_bar.py` |
 | 7 | Fitur apa yang membentuk fitur flag | 5 kartu metode (`anomaly_method_card`) menyebut persis fitur input & bobot tiap flag |
 | 8 | Sebagian grafik ada hover, sebagian tidak | Semua grafik lewat satu modul `components/charts.py` + `theme.apply_theme()` - hover template konsisten di semua chart |
 | 9 | Main behavior kurang kelihatan (presentasi) | `.behavior-callout` - kotak menonjol, font lebih besar & tebal, warna aksen, bukan lagi baris teks biasa |
-| 10 | Spasial saja, temporal tidak perlu | Filter wilayah tersedia luas; tidak ada filter berbasis waktu di mana pun |
+| 10 | Spasial saja, temporal tidak perlu | Setelah dicek ulang, dataset tidak punya atribut spasial *maupun* temporal yang bermakna — filter memakai dimensi asli (tipe tujuan, status kuras, segmen, jenis transaksi) yang sungguh-sungguh ada di data, tanpa rekayasa geografis apa pun (lihat bagian 6) |
 | 11 | Tampilkan 10 saja, sisanya tetap bisa diakses, diberi label penting/tidak | Halaman Pola: 10 kartu besar (`is_top10`) + tabel semua 135 pola bisa dicari/diurutkan, ditandai "Insight utama" vs "Insight tambahan" |
-| 12 | Data spasial(-temporal) bisa di-slice | Filter wilayah memengaruhi KPI, grafik, & tabel transaksi secara real-time di semua halaman yang relevan |
+| 12 | Data spasial(-temporal) bisa di-slice | Filter tipe tujuan & status kuras memengaruhi KPI, grafik, & tabel transaksi secara real-time di semua halaman yang relevan |
 
 ## 8. Batasan & Hal yang Perlu Diketahui
 
@@ -232,7 +246,7 @@ kolom **`wilayah`** yang:
 
 ```
 app.py                   Entry point Dash (routing, navbar, pilih backend otomatis)
-config.py                Semua label bisnis Indonesia, ambang risiko, daftar wilayah
+config.py                Semua label bisnis Indonesia, ambang risiko, daftar dimensi filter
 theme.py                 Warna, tipografi, template Plotly bersama
 docker-compose.yml        Elasticsearch (+ Dejavu opsional utk debugging index)
 requirements.txt          Dependensi dashboard & pipeline
@@ -245,7 +259,7 @@ data_backend/
 
 pipeline/
   flow.py                  Prefect @flow utama (--mode real|synthetic)
-  enrich.py                 Lapisan presentasi: wilayah, label ID, gabung pool pola
+  enrich.py                 Lapisan presentasi: tipe tujuan, status kuras, label ID, gabung pool pola
   es_indexer.py             Mapping index & bulk indexing Elasticsearch
 
 components/

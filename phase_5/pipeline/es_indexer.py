@@ -43,7 +43,8 @@ TRANSAKSI_MAPPING = {
                 "fields": {"keyword": {"type": "keyword", "ignore_above": 512}},
             },
             "isFraud": {"type": "boolean"},
-            "wilayah": {"type": "keyword"},
+            "jenis_tujuan": {"type": "keyword"},
+            "status_kuras": {"type": "keyword"},
             "high_risk": {"type": "boolean"},
         }
     },
@@ -97,7 +98,7 @@ def bulk_index_dataframe(client, df: pd.DataFrame, index_name: str, id_col: str,
         try:
             ok, _ = bulk(client, _iter_docs(chunk, index_name, id_col), chunk_size=chunk_size, request_timeout=120)
             total += ok
-        except BulkIndexError as e:  # pragma: no cover - defensif, tetap lanjut
+        except BulkIndexError as e:
             if logger:
                 logger.warning(f"Sebagian dokumen gagal diindex ({len(e.errors)} error) - lanjut ke batch berikutnya")
         if logger and (start // chunk_size) % 20 == 0:

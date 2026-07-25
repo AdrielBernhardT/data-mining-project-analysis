@@ -1,15 +1,15 @@
 networks:
-  fance-net:
+  paysim-net:
     driver: bridge
 
 volumes:
-  fance-es-data:
+  paysim-es-data:
     driver: local
 
 services:
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
-    container_name: fance-elasticsearch
+    container_name: paysim-elasticsearch
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -20,9 +20,9 @@ services:
     ports:
       - "9200:9200"
     volumes:
-      - fance-es-data:/usr/share/elasticsearch/data
+      - paysim-es-data:/usr/share/elasticsearch/data
     networks:
-      - fance-net
+      - paysim-net
     healthcheck:
       test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health || exit 1"]
       interval: 10s
@@ -37,12 +37,12 @@ services:
   # utama, cuma alat bantu debugging/verifikasi data selama pengembangan).
   dejavu:
     image: appbaseio/dejavu:3.6.0
-    container_name: fance-dejavu
+    container_name: paysim-dejavu
     ports:
       - "1358:1358"
     depends_on:
       - elasticsearch
     networks:
-      - fance-net
+      - paysim-net
     profiles:
       - tools

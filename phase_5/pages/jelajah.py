@@ -15,7 +15,7 @@ from dash import html, dcc, Input, Output, State, callback, dash_table
 import config as cfg
 from app import BACKEND
 from data_backend.base import Filters
-from components.filter_bar import make_filter_bar, read_filters, filter_summary_text
+from components.filter_bar import make_filter_bar, read_filters, filter_summary_text, page_shell, sidebar_toggle_callback
 from components.cards import kpi_row, section_header, info_banner, empty_state
 
 dash.register_page(__name__, path="/jelajah", name="Jelajah Data", title="Jelajah Data")
@@ -23,8 +23,7 @@ dash.register_page(__name__, path="/jelajah", name="Jelajah Data", title="Jelaja
 PAGE = "jelajah"
 PAGE_SIZE = 25
 
-layout = html.Div([
-    html.Div([
+_hero = html.Div([
         html.Div("DATA EXPLORER", className="page-hero-eyebrow"),
         html.H1("Jelajah Data Transaksi"),
         html.P(
@@ -32,11 +31,11 @@ layout = html.Div([
             "Ketik ID transaksi (mis. 'TX00010000'), kata kunci metode deteksi (mis. 'hdbscan', 'saldo'), "
             "atau kombinasikan dengan filter di samping."
         ),
-    ], className="page-hero"),
+], className="page-hero")
 
-    make_filter_bar(PAGE, wilayah=True, segmen=True, jenis=True, risk_level=True,
+layout = page_shell(PAGE, hero=_hero, filter_bar=make_filter_bar(PAGE, jenis_tujuan=True, status_kuras=True, segmen=True, jenis=True, risk_level=True,
                     anomaly_type=True, investigation_category=True, search=True,
-                    search_placeholder="Cari ID transaksi atau kata kunci..."),
+                    search_placeholder="Cari ID transaksi atau kata kunci..."), content=[
 
     html.Div(id=f"{PAGE}-perf-badge"),
     html.Div(id=f"{PAGE}-kpi-container"),
@@ -51,14 +50,17 @@ layout = html.Div([
     ], className="pagination-row"),
 
     dcc.Store(id=f"{PAGE}-page-num", data=1),
-], className="page-fade-in")
+])
+
+sidebar_toggle_callback(PAGE)
 
 
 @callback(
     Output(f"{PAGE}-page-num", "data"),
     Input(f"{PAGE}-prev", "n_clicks"),
     Input(f"{PAGE}-next", "n_clicks"),
-    Input(f"{PAGE}-filter-wilayah", "value"),
+    Input(f"{PAGE}-filter-jenis-tujuan", "value"),
+    Input(f"{PAGE}-filter-status-kuras", "value"),
     Input(f"{PAGE}-filter-segmen", "value"),
     Input(f"{PAGE}-filter-jenis", "value"),
     Input(f"{PAGE}-filter-risk", "value"),
@@ -68,13 +70,13 @@ layout = html.Div([
     State(f"{PAGE}-page-num", "data"),
     prevent_initial_call=True,
 )
-def _change_page(prev_clicks, next_clicks, wilayah, segmen, jenis, risk, anomaly, investigation, search, current_page):
+def _change_page(prev_clicks, next_clicks, jenis_tujuan, status_kuras, segmen, jenis, risk, anomaly, investigation, search, current_page):
     triggered = dash.ctx.triggered_id
     if triggered == f"{PAGE}-prev":
         return max(1, (current_page or 1) - 1)
     if triggered == f"{PAGE}-next":
         return (current_page or 1) + 1
-    return 1  # filter apa pun berubah -> kembali ke halaman 1
+    return 1
 
 
 @callback(
@@ -83,7 +85,8 @@ def _change_page(prev_clicks, next_clicks, wilayah, segmen, jenis, risk, anomaly
     Output(f"{PAGE}-table-wrap", "children"),
     Output(f"{PAGE}-page-indicator", "children"),
     Output(f"{PAGE}-filter-summary", "children"),
-    Input(f"{PAGE}-filter-wilayah", "value"),
+    Input(f"{PAGE}-filter-jenis-tujuan", "value"),
+    Input(f"{PAGE}-filter-status-kuras", "value"),
     Input(f"{PAGE}-filter-segmen", "value"),
     Input(f"{PAGE}-filter-jenis", "value"),
     Input(f"{PAGE}-filter-risk", "value"),
@@ -92,8 +95,8 @@ def _change_page(prev_clicks, next_clicks, wilayah, segmen, jenis, risk, anomaly
     Input(f"{PAGE}-filter-search", "value"),
     Input(f"{PAGE}-page-num", "data"),
 )
-def _update(wilayah, segmen, jenis, risk, anomaly, investigation, search, page_num):
-    f = read_filters(PAGE, wilayah=wilayah, segmen=segmen, jenis=jenis, risk=risk,
+def _update(jenis_tujuan, status_kuras, segmen, jenis, risk, anomaly, investigation, search, page_num):
+    f = read_filters(PAGE, jenis_tujuan=jenis_tujuan, status_kuras=status_kuras, segmen=segmen, jenis=jenis, risk=risk,
                       anomaly=anomaly, investigation=investigation, search=search)
     page_num = page_num or 1
 
@@ -105,7 +108,7 @@ def _update(wilayah, segmen, jenis, risk, anomaly, investigation, search, page_n
 
     tone = "success" if elapsed_ms < 100 else "warning"
     perf_badge = info_banner(
-        f"⚡ Query ini selesai dalam {elapsed_ms:.1f} ms (backend: {BACKEND.name.upper()}) — "
+        f"⚡ Query ini selesai dalam {elapsed_ms:.1f} ms (backend: {BACKEND.name.upper()}): "
         + ("memenuhi target <100ms." if elapsed_ms < 100 else
            "di atas target <100ms untuk kombinasi filter ini (pencarian teks bebas lebih berat di mode DuckDB; "
            "nyalakan Elasticsearch untuk performa konsisten <100ms pada pencarian bebas, lihat README)."),
@@ -132,7 +135,8 @@ def _build_table(rows):
         "ID Transaksi": r["transaction_id"],
         "Jenis": cfg.humanize_transaction_type(r["transaction_type"]),
         "Waktu Simulasi": cfg.day_from_step(r["step"]),
-        "Wilayah": r["wilayah"],
+        "Tipe Tujuan": r["jenis_tujuan"],
+        "Status Saldo": r["status_kuras"],
         "Segmen": int(r["cluster_kmeans"]),
         "Skor Risiko": r["risk_score"],
         "Level": r["risk_level"],
@@ -152,4 +156,4 @@ def _build_table(rows):
             {"if": {"filter_query": '{Level} = "Kritis"'}, "backgroundColor": "#FBEAE8"},
             {"if": {"filter_query": '{Fraud?} = "Ya"'}, "borderLeft": "3px solid #C1483F"},
         ],
-    ), className="fance-table")
+    ), className="paysim-table")

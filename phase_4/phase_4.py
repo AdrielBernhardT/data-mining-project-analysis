@@ -501,6 +501,15 @@ def export_summary_tables(summary_tables, output_dir):
         table.to_csv(path, index=False)
         logger.info(f"Exported Summary Table: {path}")
 
+@task
+def export_full_dataset(df, output_path):
+    logger = get_run_logger()
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    df.to_parquet(output_path, index=False)
+
+    logger.info(f"Exported Full Scored Dataset: {output_path}")
 
 @flow
 def handling_outlier_pipeline():
@@ -532,6 +541,11 @@ def handling_outlier_pipeline():
 
     # 5) Fraud validation + confusion matrix
     df, metrics = validate_fraud(df)
+
+    export_full_dataset(
+        df,
+        "../datasets/phase_4/paysim_full_scored.parquet"
+    )
 
     # 6) Ringkasan untuk laporan/dashboard Phase 5
     summary_tables = summarize_investigation(df)
