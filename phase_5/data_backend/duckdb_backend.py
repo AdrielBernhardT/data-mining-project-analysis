@@ -26,7 +26,8 @@ import duckdb
 from data_backend.base import DataBackend, Filters
 
 CUBE_FILTER_COLS = {
-    "wilayah": "wilayah",
+    "jenis_tujuan": "jenis_tujuan",
+    "status_kuras": "status_kuras",
     "jenis_transaksi": "transaction_type",
     "segmen": "cluster_kmeans",
     "risk_level": "risk_level",
@@ -38,7 +39,8 @@ CUBE_FILTER_COLS = {
 def _cube_where(filters: Filters) -> tuple[str, list]:
     clauses, params = [], []
     mapping = {
-        "wilayah": filters.wilayah,
+        "jenis_tujuan": filters.jenis_tujuan,
+        "status_kuras": filters.status_kuras,
         "jenis_transaksi": filters.jenis_transaksi,
         "segmen": [int(s) for s in filters.segmen] if filters.segmen else [],
         "risk_level": filters.risk_level,
@@ -62,9 +64,6 @@ def _cube_where(filters: Filters) -> tuple[str, list]:
 
 import re
 
-# Kata kunci umum -> kolom flag ber-indeks (jauh lebih cepat drpd ILIKE bebas
-# di kolom teks anomaly_reason, karena boolean scan >100x lebih murah drpd
-# substring scan pada 6,3 juta baris - lihat BENCHMARK.md).
 SEARCH_KEYWORD_TO_FLAG = {
     "iqr": "flag_IQR",
     "z-score": "flag_ZScore", "zscore": "flag_ZScore", "z score": "flag_ZScore",
@@ -73,7 +72,7 @@ SEARCH_KEYWORD_TO_FLAG = {
     "saldo": "flag_BalanceMismatch", "balance": "flag_BalanceMismatch",
 }
 _ID_PATTERN = re.compile(r"^TX?\d+$", re.IGNORECASE)
-_FULL_ID_LEN = 10  # "TX" + 8 digit -> panjang transaction_id asli
+_FULL_ID_LEN = 10
 
 
 def _row_where(filters: Filters) -> tuple[str, list, Optional[str]]:
@@ -83,7 +82,8 @@ def _row_where(filters: Filters) -> tuple[str, list, Optional[str]]:
     harus scan tabel penuh (hanya saat mode='ilike' teks bebas)."""
     clauses, params = [], []
     mapping = {
-        "wilayah": filters.wilayah,
+        "jenis_tujuan": filters.jenis_tujuan,
+        "status_kuras": filters.status_kuras,
         "transaction_type": filters.jenis_transaksi,
         "cluster_kmeans": [int(s) for s in filters.segmen] if filters.segmen else [],
         "risk_level": filters.risk_level,
@@ -153,10 +153,16 @@ class DuckDBBackend(DataBackend):
         cols = [d[0] for d in cur.description]
         return [dict(zip(cols, row)) for row in cur.fetchall()]
 
-    # ------------------------------------------------------------------
-    # SEMUA method di bawah ini query tabel `cube` (ribuan baris), BUKAN
-    # tabel `transaksi` (jutaan baris) -> ini kunci performanya.
-    # ------------------------------------------------------------------
+    def _cube_has(self, column: str) -> bool:
+        """True kalau `column` ada di tabel cube. Dipakai untuk menjaga agar
+        query anomali tidak error saat phase 4 tak mengekspor kolom tsb -
+        grafik cukup kosong dengan pesan, bukan crash seluruh halaman."""
+        try:
+            cols = [d[0] for d in self._con.execute("SELECT * FROM cube LIMIT 0").description]
+            return column in cols
+        except Exception:
+            return False
+
     def get_kpi(self, filters: Filters) -> dict[str, Any]:
         where, params = _cube_where(filters)
         sql = f"""
@@ -216,6 +222,8 @@ class DuckDBBackend(DataBackend):
         return rows
 
     def get_anomaly_type_summary(self, filters: Filters) -> list[dict]:
+        if not self._cube_has("anomaly_type"):
+            return []
         where, params = _cube_where(filters)
         sql = f"SELECT anomaly_type, SUM(n) AS transactions FROM cube WHERE {where} GROUP BY anomaly_type"
         rows = self._rows(sql, params)
@@ -225,12 +233,109 @@ class DuckDBBackend(DataBackend):
         return rows
 
     def get_investigation_summary(self, filters: Filters) -> list[dict]:
+        if not self._cube_has("investigation_category"):
+            return []
         where, params = _cube_where(filters)
         sql = f"SELECT investigation_category, SUM(n) AS transactions FROM cube WHERE {where} GROUP BY investigation_category"
         rows = self._rows(sql, params)
         total = sum(r["transactions"] for r in rows) or 1
         for r in rows:
             r["percentage"] = 100.0 * r["transactions"] / total
+        return rows
+
+    def get_segment_projection(self, filters: Filters, method: str | None = None, dim: int | None = None) -> list[dict]:
+        """Kembalikan titik koordinat UMAP/t-SNE untuk scatter segmen. Membaca
+        tabel `projection`. method ('umap'/'tsne') & dim (2/3) memilih varian
+        kalau file punya beberapa varian (kolom method/dim). Kalau tabel/varian
+        tak ada, kembalikan [] supaya dashboard tetap jalan."""
+        try:
+            has = self._con.execute(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'projection'"
+            ).fetchone()[0]
+        except Exception:
+            has = 0
+        if not has:
+            return []
+
+        conds, params = [], []
+        proj_cols = [d[0] for d in self._con.execute("SELECT * FROM projection LIMIT 0").description]
+        if method and "method" in proj_cols:
+            conds.append("method = ?")
+            params.append(method.lower())
+        if dim and "dim" in proj_cols:
+            conds.append("dim = ?")
+            params.append(int(dim))
+        if getattr(filters, "jenis_tujuan", None) and "jenis_tujuan" in proj_cols:
+            conds.append("jenis_tujuan = ANY(?)")
+            params.append(list(filters.jenis_tujuan))
+        if getattr(filters, "segmen", None):
+            conds.append("cluster_kmeans = ANY(?)")
+            params.append([int(s) for s in filters.segmen])
+        where = " AND ".join(conds) if conds else "TRUE"
+        want_z = ("proj_z" in proj_cols) and (dim != 2)
+        z_col = ", proj_z" if want_z else ""
+        max_points = 3000
+        try:
+            total = self._con.execute(
+                f"SELECT COUNT(*) FROM projection WHERE {where}", params
+            ).fetchone()[0]
+        except Exception:
+            total = 0
+        sample_clause = ""
+        if total > max_points:
+            pct = max(1.0, (max_points / total) * 100.0)
+            sample_clause = f" USING SAMPLE {pct:.2f} PERCENT (bernoulli, 42)"
+        sql = f"SELECT proj_x, proj_y{z_col}, cluster_kmeans, isFraud FROM projection WHERE {where}{sample_clause}"
+        return self._rows(sql, params)
+
+    def get_cluster_profile(self, filters: Filters) -> list[dict]:
+        """Profil tiap segmen dari cube: komposisi jenis transaksi dominan,
+        tingkat fraud, high-risk, dan tujuan merchant. Dipakai untuk kartu/tabel
+        profil di halaman Segmentasi. Kebal terhadap kolom yang hilang -
+        kolom yang tak ada cukup dilewati, bukan menjatuhkan seluruh halaman."""
+        if not self._cube_has("cluster_kmeans"):
+            return []
+        where, params = _cube_where(filters)
+
+        has_merchant = self._cube_has("jenis_tujuan")
+        has_drain = self._cube_has("status_kuras")
+        merchant_expr = "SUM(CASE WHEN jenis_tujuan='Merchant' THEN n ELSE 0 END)" if has_merchant else "0"
+        drain_expr = "SUM(CASE WHEN status_kuras='Terkuras Habis' THEN n ELSE 0 END)" if has_drain else "0"
+
+        sql = f"""
+            SELECT cluster_kmeans,
+                   SUM(n) AS total,
+                   SUM(CASE WHEN isFraud THEN n ELSE 0 END) AS fraud,
+                   SUM(CASE WHEN high_risk THEN n ELSE 0 END) AS high_risk,
+                   {merchant_expr} AS to_merchant,
+                   {drain_expr} AS drained
+            FROM cube WHERE {where}
+            GROUP BY cluster_kmeans ORDER BY cluster_kmeans
+        """
+        rows = self._rows(sql, params)
+
+        dominant = {}
+        if self._cube_has("transaction_type"):
+            sql2 = f"""
+                SELECT cluster_kmeans, transaction_type, SUM(n) AS n
+                FROM cube WHERE {where}
+                GROUP BY cluster_kmeans, transaction_type
+            """
+            for r in self._rows(sql2, params):
+                cid = r["cluster_kmeans"]
+                if cid not in dominant or r["n"] > dominant[cid][1]:
+                    dominant[cid] = (r["transaction_type"], r["n"])
+
+        for r in rows:
+            t = r["total"] or 1
+            cid = r["cluster_kmeans"]
+            r["fraud_rate"] = r["fraud"] / t
+            r["high_risk_rate"] = r["high_risk"] / t
+            r["merchant_share"] = (r["to_merchant"] / t) if has_merchant else 0.0
+            r["drained_share"] = (r["drained"] / t) if has_drain else 0.0
+            dom = dominant.get(cid, ("-", 0))
+            r["dominant_type"] = dom[0]
+            r["dominant_type_share"] = (dom[1] / t) if t else 0.0
         return rows
 
     def get_fraud_by_score(self, filters: Filters) -> list[dict]:
@@ -246,8 +351,10 @@ class DuckDBBackend(DataBackend):
         return rows
 
     def get_method_overlap(self, filters: Filters) -> list[dict]:
-        where, params = _cube_where(filters)
         methods = ["flag_IQR", "flag_ZScore", "flag_IsoForest", "flag_HDBSCAN"]
+        if not all(self._cube_has(m) for m in methods):
+            return []
+        where, params = _cube_where(filters)
         select_bits = []
         for m1 in methods:
             for m2 in methods:
@@ -262,14 +369,31 @@ class DuckDBBackend(DataBackend):
             matrix.append(entry)
         return matrix
 
-    def get_wilayah_breakdown(self, filters: Filters) -> list[dict]:
+    def get_dest_type_breakdown(self, filters: Filters) -> list[dict]:
         where, params = _cube_where(filters)
         sql = f"""
-            SELECT wilayah, SUM(n) AS transactions,
+            SELECT jenis_tujuan, SUM(n) AS transactions,
                    SUM(CASE WHEN isFraud THEN n ELSE 0 END) AS fraud_count,
                    SUM(CASE WHEN high_risk THEN n ELSE 0 END) AS high_risk_count,
                    SUM(risk_score * n)::DOUBLE / NULLIF(SUM(n),0) AS avg_risk_score
-            FROM cube WHERE {where} GROUP BY wilayah ORDER BY transactions DESC
+            FROM cube WHERE {where} GROUP BY jenis_tujuan ORDER BY transactions DESC
+        """
+        rows = self._rows(sql, params)
+        total = sum(r["transactions"] for r in rows) or 1
+        for r in rows:
+            r["share"] = r["transactions"] / total
+            r["fraud_rate"] = (r["fraud_count"] / r["transactions"]) if r["transactions"] else 0.0
+            r["high_risk_rate"] = (r["high_risk_count"] / r["transactions"]) if r["transactions"] else 0.0
+        return rows
+
+    def get_drain_status_breakdown(self, filters: Filters) -> list[dict]:
+        where, params = _cube_where(filters)
+        sql = f"""
+            SELECT status_kuras, SUM(n) AS transactions,
+                   SUM(CASE WHEN isFraud THEN n ELSE 0 END) AS fraud_count,
+                   SUM(CASE WHEN high_risk THEN n ELSE 0 END) AS high_risk_count,
+                   SUM(risk_score * n)::DOUBLE / NULLIF(SUM(n),0) AS avg_risk_score
+            FROM cube WHERE {where} GROUP BY status_kuras ORDER BY transactions DESC
         """
         rows = self._rows(sql, params)
         total = sum(r["transactions"] for r in rows) or 1
@@ -280,6 +404,8 @@ class DuckDBBackend(DataBackend):
         return rows
 
     def get_transaction_type_breakdown(self, filters: Filters) -> list[dict]:
+        if not self._cube_has("transaction_type"):
+            return []
         where, params = _cube_where(filters)
         sql = f"""
             SELECT transaction_type, SUM(n) AS transactions,
@@ -293,17 +419,13 @@ class DuckDBBackend(DataBackend):
             r["fraud_rate"] = (r["fraud_count"] / r["transactions"]) if r["transactions"] else 0.0
         return rows
 
-    # ------------------------------------------------------------------
-    # Satu-satunya method yang menyentuh tabel `transaksi` penuh (6,3 juta
-    # baris) karena memang perlu mengembalikan baris individual, bukan agregat.
-    # ------------------------------------------------------------------
     def search_transactions(
         self, filters: Filters, sort_col: str = "risk_score", sort_dir: str = "desc",
         page: int = 1, page_size: int = 25,
     ) -> tuple[list[dict], int]:
         where, params, search_mode = _row_where(filters)
         safe_cols = {
-            "risk_score", "amount", "step", "transaction_type", "wilayah",
+            "risk_score", "amount", "step", "transaction_type", "jenis_tujuan",
             "cluster_kmeans", "risk_level", "isFraud", "anomaly_type",
         }
         if sort_col not in safe_cols:
@@ -313,29 +435,26 @@ class DuckDBBackend(DataBackend):
         no_amount_filter = filters.amount_min is None and filters.amount_max is None
         skip_count = False
         if search_mode is None and no_amount_filter:
-            # Tidak ada pencarian teks & tidak ada filter nominal -> semua
-            # kondisi tersedia sbg dimensi cube, hitung total dari cube (instan).
             total = self.count(filters)
         elif search_mode == "id_exact":
-            # transaction_id unik -> tidak perlu query COUNT terpisah sama sekali,
-            # cukup lihat apakah baris ditemukan pada query data di bawah.
             skip_count = True
             total = None
         else:
-            # Butuh scan tabel penuh (prefix ID/kata kunci/teks bebas/rentang
-            # nominal). Batasi biaya penghitungan total dgn subquery ber-LIMIT
-            # supaya latensi worst-case tetap terkendali - mirip
-            # `track_total_hits` di Elasticsearch, yang juga membatasi
-            # hitungan total demi performa pada koleksi besar (pengguna
-            # tetap melihat "50.000+" bila melampaui batas).
             count_sql = f"SELECT COUNT(*) AS n FROM (SELECT 1 FROM transaksi WHERE {where} LIMIT 50001)"
             total = self._rows(count_sql, params)[0]["n"]
 
         offset = max(0, (page - 1) * page_size)
         order_clause = f"ORDER BY {sort_col} {sort_dir}" if search_mode != "id_exact" else ""
+        wanted = ["transaction_id", "step", "transaction_type", "amount", "jenis_tujuan",
+                  "status_kuras", "cluster_kmeans", "risk_score", "risk_level",
+                  "investigation_category", "anomaly_type", "anomaly_reason", "isFraud"]
+        try:
+            present = {d[0] for d in self._con.execute("SELECT * FROM transaksi LIMIT 0").description}
+        except Exception:
+            present = set(wanted)
+        select_cols = ", ".join(c if c in present else f"NULL AS {c}" for c in wanted)
         data_sql = f"""
-            SELECT transaction_id, step, transaction_type, amount, wilayah, cluster_kmeans,
-                   risk_score, risk_level, investigation_category, anomaly_type, anomaly_reason, isFraud
+            SELECT {select_cols}
             FROM transaksi WHERE {where}
             {order_clause}
             LIMIT ? OFFSET ?
@@ -346,7 +465,8 @@ class DuckDBBackend(DataBackend):
         return rows, total
 
     def get_rules(self, rule_group: Optional[str] = None, min_lift: float = 0.0,
-                  search: str = "", limit: Optional[int] = None) -> list[dict]:
+                  search: str = "", limit: Optional[int] = None,
+                  min_confidence: float = 0.0, attribute: Optional[str] = None) -> list[dict]:
         clauses = ["1=1"]
         params: list = []
         if rule_group:
@@ -355,6 +475,13 @@ class DuckDBBackend(DataBackend):
         if min_lift:
             clauses.append("lift >= ?")
             params.append(float(min_lift))
+        if min_confidence:
+            clauses.append("confidence >= ?")
+            params.append(float(min_confidence))
+        if attribute:
+            clauses.append("(antecedents_str ILIKE ? OR consequents_str ILIKE ?)")
+            atom = f"%{attribute}%"
+            params.extend([atom, atom])
         if search:
             clauses.append("(when_text ILIKE ? OR then_text ILIKE ?)")
             needle = f"%{search}%"
@@ -380,16 +507,17 @@ def benchmark(db_path: str, n_iterations: int = 25) -> dict:
     backend = DuckDBBackend(db_path, read_only=True)
     scenarios = {
         "kpi_tanpa_filter": lambda: backend.get_kpi(Filters()),
-        "kpi_dgn_filter_wilayah": lambda: backend.get_kpi(Filters(wilayah=["Jabodetabek"])),
+        "kpi_dgn_filter_jenis_tujuan": lambda: backend.get_kpi(Filters(jenis_tujuan=["Merchant"])),
         "kpi_filter_kompleks": lambda: backend.get_kpi(
-            Filters(wilayah=["Jabodetabek", "Sumatera"], risk_level=["Tinggi", "Kritis"], segmen=[1, 2])
+            Filters(jenis_tujuan=["Merchant"], status_kuras=["Terkuras Habis"], risk_level=["Tinggi", "Kritis"], segmen=[1, 2])
         ),
         "segmen_summary": lambda: backend.get_segment_summary(Filters()),
-        "wilayah_breakdown": lambda: backend.get_wilayah_breakdown(Filters()),
+        "dest_type_breakdown": lambda: backend.get_dest_type_breakdown(Filters()),
+        "drain_status_breakdown": lambda: backend.get_drain_status_breakdown(Filters()),
         "method_overlap": lambda: backend.get_method_overlap(Filters()),
         "cari_transaksi_hal_1": lambda: backend.search_transactions(Filters(), page=1, page_size=25),
         "cari_dgn_filter_kompleks": lambda: backend.search_transactions(
-            Filters(risk_level=["Tinggi", "Kritis"], wilayah=["Jabodetabek", "Jawa Barat"]), page=1, page_size=25,
+            Filters(risk_level=["Tinggi", "Kritis"], jenis_tujuan=["Merchant"], status_kuras=["Terkuras Habis"]), page=1, page_size=25,
         ),
         "cari_dgn_teks": lambda: backend.search_transactions(Filters(search="TX0001"), page=1, page_size=25),
     }

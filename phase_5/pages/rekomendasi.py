@@ -1,9 +1,9 @@
 """
 pages/rekomendasi.py - Rekomendasi Bisnis
-Setiap rekomendasi terikat ke temuan nyata (segmen/pola/jenis anomali tertentu).
-Filter wilayah pada halaman ini bukan sekadar pajangan - dipakai untuk menghitung
-ULANG relevansi tiap rekomendasi (mis. "di wilayah ini, segmen terkait masih X%
-high-risk"), jadi genuinely interaktif, bukan teks statis (slicer wajib per halaman).
+
+Teks dipangkas: kartu ringkas (judul + satu kalimat inti), detail di balik
+'Lihat detail'. Peta rekomendasi interaktif (prioritas x kategori) sebagai
+anchor visual. Relevansi tiap rekomendasi tetap dihitung ulang ikut filter.
 """
 from __future__ import annotations
 
@@ -13,8 +13,9 @@ from dash import html, dcc, Input, Output, callback
 import config as cfg
 from app import BACKEND
 from data_backend.base import Filters
-from components.filter_bar import make_filter_bar, read_filters
-from components.cards import kpi_row, section_header, recommendation_card, empty_state
+from components.filter_bar import make_filter_bar, page_shell, sidebar_toggle_callback
+from components.cards import kpi_row, section_header, recommendation_card_compact, empty_state
+import components.charts as ch
 
 dash.register_page(__name__, path="/rekomendasi", name="Rekomendasi", title="Rekomendasi Bisnis")
 
@@ -22,18 +23,14 @@ PAGE = "rekomendasi"
 PRIORITY_ALL = "Semua prioritas"
 PRIORITY_CHOICES = [PRIORITY_ALL, "Tinggi", "Sedang", "Rendah"]
 
-layout = html.Div([
-    html.Div([
-        html.Div("BUSINESS RECOMMENDATIONS", className="page-hero-eyebrow"),
-        html.H1("Rekomendasi Tindak Lanjut"),
-        html.P(
-            "Rekomendasi konkret, masing-masing terikat ke temuan nyata dari segmentasi, pola asosiasi, "
-            "atau deteksi anomali - bukan saran generik. Gunakan filter wilayah untuk melihat apakah "
-            "temuan yang mendasari tiap rekomendasi masih relevan pada irisan data tertentu."
-        ),
-    ], className="page-hero"),
+_hero = html.Div([
+    html.Div("BUSINESS RECOMMENDATIONS", className="page-hero-eyebrow"),
+    html.H1("Rekomendasi Tindak Lanjut"),
+    html.P("Tindakan konkret, tiap butir terikat ke temuan nyata. Filter tipe tujuan di sidebar "
+           "menghitung ulang relevansinya."),
+], className="page-hero")
 
-    make_filter_bar(PAGE, wilayah=True, segmen=False, jenis=False),
+layout = page_shell(PAGE, hero=_hero, filter_bar=make_filter_bar(PAGE, jenis_tujuan=True, segmen=False, jenis=False), content=[
 
     html.Div([
         html.Span("Prioritas:", className="chip-row-label"),
@@ -42,11 +39,18 @@ layout = html.Div([
 
     html.Div(id=f"{PAGE}-kpi-container"),
 
-    section_header("Daftar Rekomendasi", "Diurutkan berdasarkan prioritas. Bagian 'Relevansi saat ini' dihitung ulang mengikuti filter wilayah di atas."),
+    section_header("Rekomendasi Berdasarkan Prioritas",
+                   "Berapa banyak rekomendasi di tiap tingkat prioritas, dipilah per kategori. "
+                   "Arahkan kursor ke batang untuk melihat daftar rekomendasinya. Mulai dari prioritas tinggi."),
+    html.Div([dcc.Graph(id=f"{PAGE}-rec-map", config={"displayModeBar": False})], className="chart-card"),
+
+    section_header("Daftar Rekomendasi", "Ringkas: klik 'Lihat detail' untuk uraian & relevansi terkini."),
     html.Div(id=f"{PAGE}-rec-cards", className="recommendation-grid"),
 
     dcc.Store(id=f"{PAGE}-active-priority", data=PRIORITY_ALL),
-], className="page-fade-in")
+])
+
+sidebar_toggle_callback(PAGE)
 
 
 @callback(
@@ -68,11 +72,12 @@ def _toggle_priority(_n_clicks):
 
 @callback(
     Output(f"{PAGE}-kpi-container", "children"),
+    Output(f"{PAGE}-rec-map", "figure"),
     Output(f"{PAGE}-rec-cards", "children"),
     Input(f"{PAGE}-active-priority", "data"),
-    Input(f"{PAGE}-filter-wilayah", "value"),
+    Input(f"{PAGE}-filter-jenis-tujuan", "value"),
 )
-def _update(active_priority, wilayah):
+def _update(active_priority, jenis_tujuan):
     recs = cfg.RECOMMENDATIONS
     if active_priority and active_priority != PRIORITY_ALL:
         recs = [r for r in recs if r["priority"] == active_priority]
@@ -84,41 +89,43 @@ def _update(active_priority, wilayah):
     kpis = kpi_row([
         dict(label="Total Rekomendasi", value=str(len(cfg.RECOMMENDATIONS)), icon="✅", tone="brand"),
         dict(label="Prioritas Tinggi", value=str(n_tinggi), icon="🔴", tone="danger"),
-        dict(label="Ditampilkan Saat Ini", value=str(len(recs)), icon="📋"),
+        dict(label="Ditampilkan", value=str(len(recs)), icon="📋"),
     ])
 
-    f_wilayah = Filters(wilayah=wilayah or [])
-    cards = [_recommendation_card_with_relevance(r, f_wilayah) for r in recs] if recs else [
+    fig_map = ch.recommendation_map(recs)
+
+    f_dasar = Filters(jenis_tujuan=jenis_tujuan or [])
+    cards = [_card_with_relevance(r, f_dasar) for r in recs] if recs else [
         empty_state("Tidak ada rekomendasi pada prioritas ini.")
     ]
-    return kpis, cards
+    return kpis, fig_map, cards
 
 
-def _recommendation_card_with_relevance(rec: dict, f_wilayah: Filters) -> html.Div:
-    card = recommendation_card(rec)
+def _card_with_relevance(rec: dict, f_dasar: Filters) -> html.Div:
+    """Kartu ringkas + baris relevansi hidup (dihitung ulang ikut filter)."""
+    card = recommendation_card_compact(rec)
     relevance_text = None
     if rec.get("related_segment") is not None:
-        seg_filter = Filters(wilayah=f_wilayah.wilayah, segmen=[rec["related_segment"]])
+        seg_filter = Filters(jenis_tujuan=f_dasar.jenis_tujuan, segmen=[rec["related_segment"]])
         rows = BACKEND.get_segment_summary(seg_filter)
         if rows:
             r = rows[0]
             relevance_text = (
-                f"📍 Pada irisan data saat ini: Segmen {rec['related_segment']} = "
-                f"{cfg.format_int(r['transactions'])} transaksi, {cfg.format_pct(r['high_risk_rate'], 2)} high-risk, "
-                f"rata-rata skor {r['avg_risk_score']:.2f}".replace(".", ",") + "."
+                f"📍 Irisan saat ini: Segmen {rec['related_segment']} = {cfg.format_int(r['transactions'])} transaksi, "
+                f"{cfg.format_pct(r['high_risk_rate'], 2)} high-risk."
             )
     elif rec.get("related_anomaly_type"):
-        rows = BACKEND.get_anomaly_type_summary(f_wilayah)
+        rows = BACKEND.get_anomaly_type_summary(f_dasar)
         match = next((r for r in rows if r["anomaly_type"] == rec["related_anomaly_type"]), None)
         if match:
             relevance_text = (
-                f"📍 Pada irisan data saat ini: '{rec['related_anomaly_type']}' = "
-                f"{cfg.format_int(match['transactions'])} transaksi ({match['percentage']:.2f}".replace(".", ",") + "% dari filter aktif)."
+                f"📍 Irisan saat ini: '{rec['related_anomaly_type']}' = {cfg.format_int(match['transactions'])} transaksi "
+                f"({match['percentage']:.2f}".replace(".", ",") + "% dari filter)."
             )
     elif rec.get("related_rule_group"):
         n = len(BACKEND.get_rules(rule_group=rec["related_rule_group"]))
-        relevance_text = f"📍 {n} pola termasuk kelompok '{rec['related_rule_group']}' tersedia di halaman Pola & Asosiasi."
+        relevance_text = f"📍 {n} pola kelompok '{rec['related_rule_group']}' (lihat tab Pola)."
 
     if relevance_text:
-        card.children.append(html.Div(relevance_text, className="rec-relevance-live"))
+        card.children[3] = html.Div(relevance_text, className="rec-relevance-live")
     return card

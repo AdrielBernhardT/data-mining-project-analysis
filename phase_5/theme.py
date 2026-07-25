@@ -12,51 +12,43 @@ butuh perhatian. Skala risiko memakai gradasi sejuk -> hangat -> panas
 (bukan hijau/merah generik) supaya tetap enak dibaca dan tidak norak.
 """
 
-# ---------------------------------------------------------------------------
-# PALET WARNA
-# ---------------------------------------------------------------------------
 
 COLORS = {
-    # Netral / permukaan
-    "bg": "#F2F4F9",            # latar halaman (abu-biru sangat muda)
-    "bg_alt": "#E9ECF4",        # latar sekunder (strip, hover row)
-    "surface": "#FFFFFF",       # kartu / panel
-    "surface_sunken": "#F7F8FC",# kotak info di dalam kartu
+    "bg": "#F2F4F9",
+    "bg_alt": "#E9ECF4",
+    "surface": "#FFFFFF",
+    "surface_sunken": "#F7F8FC",
     "border": "#DFE3EE",
     "border_strong": "#C7CEE0",
-    "ink": "#121A2E",            # teks utama
-    "ink_soft": "#4B5468",       # teks sekunder
-    "ink_faint": "#8A93A8",      # teks tersier / placeholder
+    "ink": "#121A2E",
+    "ink_soft": "#4B5468",
+    "ink_faint": "#8A93A8",
 
-    # Merek
-    "brand": "#122A52",          # navy ledger - header, nav, judul
-    "brand_deep": "#0B1B38",     # navy lebih gelap (hero gradient)
-    "brand_soft": "#E7ECF7",     # tint navy sangat muda (chip/badge default)
-    "accent": "#D99A3D",         # emas/tembaga - aksen, CTA, sorotan "penting"
+    "brand": "#122A52",
+    "brand_deep": "#0B1B38",
+    "brand_soft": "#E7ECF7",
+    "accent": "#D99A3D",
     "accent_deep": "#B87B25",
     "accent_soft": "#FBEDD4",
 
-    # Skala risiko sekuensial (Normal -> Kritis), sejuk -> panas
     "risk_normal": "#9AA6BC",
     "risk_low": "#4E9C86",
     "risk_medium": "#E3B04B",
     "risk_high": "#DB7C3F",
     "risk_critical": "#C1483F",
 
-    # Kualitatif untuk 4 segmen nasabah (dibuat beda hue, saturasi mirip)
     "seg_0": "#2C5490",
     "seg_1": "#3E8E7E",
     "seg_2": "#8C6AA8",
     "seg_3": "#C98A46",
+    "seg_4": "#B85C6E",
 
-    # Status
     "success": "#3E8E63",
     "warning": "#D99A3D",
     "danger": "#C1483F",
     "info": "#3E6FA8",
 }
 
-# Urutan warna kategorikal default untuk grafik multi-kategori umum
 CATEGORICAL_SEQUENCE = [
     COLORS["brand"], COLORS["accent"], COLORS["seg_1"], COLORS["seg_2"],
     COLORS["seg_3"], COLORS["info"], COLORS["danger"], COLORS["ink_faint"],
@@ -71,7 +63,7 @@ RISK_COLOR_MAP = {
     "Kritis": COLORS["risk_critical"],
 }
 
-SEGMENT_COLOR_LIST = [COLORS["seg_0"], COLORS["seg_1"], COLORS["seg_2"], COLORS["seg_3"]]
+SEGMENT_COLOR_LIST = [COLORS["seg_0"], COLORS["seg_1"], COLORS["seg_2"], COLORS["seg_3"], COLORS["seg_4"]]
 
 
 def segment_color(cluster_id):
@@ -80,13 +72,6 @@ def segment_color(cluster_id):
     except (ValueError, TypeError):
         return COLORS["ink_faint"]
 
-
-# ---------------------------------------------------------------------------
-# TIPOGRAFI
-# ---------------------------------------------------------------------------
-# - Space Grotesk : judul/heading (karakter geometris, terasa "analitik")
-# - Inter         : UI & body copy (sangat terbaca untuk teks padat)
-# - IBM Plex Mono : angka KPI & skor (kesan presisi "buku besar")
 
 FONT_HEADING = "'Space Grotesk', 'Inter', sans-serif"
 FONT_BODY = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif"
@@ -99,11 +84,6 @@ GOOGLE_FONTS_URL = (
     "family=IBM+Plex+Mono:wght@500;600&display=swap"
 )
 
-# ---------------------------------------------------------------------------
-# TEMPLATE PLOTLY BERSAMA
-# ---------------------------------------------------------------------------
-# Dipakai oleh SEMUA fungsi pembuat grafik di components/charts.py supaya
-# hover, font, dan warna latar konsisten di seluruh dashboard.
 
 PLOTLY_LAYOUT_DEFAULTS = dict(
     font=dict(family=FONT_BODY, size=13, color=COLORS["ink"]),

@@ -13,7 +13,7 @@ import config as cfg
 
 def kpi_card(label: str, value: str, sublabel: str = "", tone: str = "default", icon: str = "") -> html.Div:
     return html.Div([
-        html.Div([html.Span(icon, className="kpi-icon"), html.Span(label, className="kpi-label")], className="kpi-top"),
+        html.Div([html.Span(label, className="kpi-label")], className="kpi-top"),
         html.Div(value, className="kpi-value"),
         html.Div(sublabel, className="kpi-sublabel") if sublabel else None,
     ], className=f"kpi-card kpi-tone-{tone}")
@@ -35,11 +35,11 @@ def section_header(title: str, subtitle: str = "", right_element=None) -> html.D
 
 def segment_card(row: dict, selected: bool = False) -> html.Div:
     cid = int(row["cluster_kmeans"])
-    name = cfg.SEGMENT_NAMES[cid]
-    profile = cfg.SEGMENT_PROFILE[cid]
-    value = cfg.SEGMENT_VALUE[cid]
-    behavior = cfg.SEGMENT_BEHAVIOR[cid]
-    icon = cfg.SEGMENT_ICON[cid]
+    name = cfg.SEGMENT_NAMES.get(cid, f"Segmen {cid}")
+    profile = cfg.SEGMENT_PROFILE.get(cid, "Profil segmen belum didefinisikan di config.py.")
+    value = cfg.SEGMENT_VALUE.get(cid, "-")
+    behavior = cfg.SEGMENT_BEHAVIOR.get(cid, "-")
+    icon = cfg.SEGMENT_ICON.get(cid, "❓")
     return html.Div([
         html.Div([
             html.Div(f"Segmen {cid}", className=f"segment-badge segment-badge-{cid}"),
@@ -67,6 +67,40 @@ def _mini_stat(value: str, label: str) -> html.Div:
                      className="mini-stat")
 
 
+def ranked_rule_card(row: dict, rank: int) -> html.Div:
+    """Kartu aturan dengan nomor peringkat besar di kiri - untuk daftar top-10
+    yang di-scroll vertikal (rank mudah dibaca, tak seperti grid 2 kolom)."""
+    badge_class = {
+        cfg.RULE_GROUP_FRAUD: "badge-danger", cfg.RULE_GROUP_SEGMENT: "badge-info",
+        cfg.RULE_GROUP_OUTLIER: "badge-warning", cfg.RULE_GROUP_GENERAL: "badge-neutral",
+    }.get(row["rule_group"], "badge-neutral")
+    return html.Div([
+        html.Div(f"#{rank}", className="rule-rank-badge"),
+        html.Div([
+            html.Div([
+                html.Span(row["rule_group"], className=f"badge {badge_class}"),
+                html.Span(row.get("penting", ""), className="badge badge-secondary"),
+            ], className="rule-badges"),
+            html.Div([
+                html.Div([
+                    html.Span("JIKA", className="rule-side-label"),
+                    html.Span(row["when_text"], className="rule-clause"),
+                ], className="rule-side rule-side-if"),
+                html.Span("→", className="rule-arrow"),
+                html.Div([
+                    html.Span("MAKA", className="rule-side-label"),
+                    html.Span(row["then_text"], className="rule-clause"),
+                ], className="rule-side rule-side-then"),
+            ], className="rule-statement-arrow"),
+            html.Div([
+                _mini_stat(row["coverage_fmt"], "coverage"),
+                _mini_stat(row["confidence_fmt"], "confidence"),
+                _mini_stat(row["lift_fmt"], "lift"),
+            ], className="segment-stats-grid rule-stats-grid"),
+        ], className="rule-rank-body"),
+    ], className="rule-card rule-card-ranked")
+
+
 def rule_card(row: dict) -> html.Div:
     badge_class = {
         cfg.RULE_GROUP_FRAUD: "badge-danger", cfg.RULE_GROUP_SEGMENT: "badge-info",
@@ -79,11 +113,16 @@ def rule_card(row: dict) -> html.Div:
             html.Span(row.get("penting", ""), className=f"badge {importance_class}"),
         ], className="rule-badges"),
         html.Div([
-            html.Span("JIKA", className="rule-keyword rule-keyword-if"),
-            html.P(row["when_text"], className="rule-clause"),
-            html.Span("MAKA", className="rule-keyword rule-keyword-then"),
-            html.P(row["then_text"], className="rule-clause"),
-        ], className="rule-statement"),
+            html.Div([
+                html.Span("JIKA", className="rule-side-label"),
+                html.P(row["when_text"], className="rule-clause"),
+            ], className="rule-side rule-side-if"),
+            html.Span("→", className="rule-arrow"),
+            html.Div([
+                html.Span("MAKA", className="rule-side-label"),
+                html.P(row["then_text"], className="rule-clause"),
+            ], className="rule-side rule-side-then"),
+        ], className="rule-statement-arrow"),
         html.P(row["takeaway"], className="rule-takeaway"),
         html.Div([
             html.Span("💡 ", className="rec-icon"),
@@ -126,6 +165,29 @@ def recommendation_card(rec: dict) -> html.Div:
         html.P(rec["description"], className="segment-text"),
         html.Div([html.B("Berdasarkan: "), rec["evidence"]], className="rec-evidence"),
         html.Div(id={"type": "rec-relevance", "index": rec["id"]}, className="rec-relevance"),
+    ], className="recommendation-card")
+
+
+def recommendation_card_compact(rec: dict) -> html.Div:
+    """Kartu rekomendasi ringkas: judul + badge + satu kalimat inti selalu tampil;
+    deskripsi panjang & dasar temuan disembunyikan di balik <details> (klik
+    'Lihat detail') supaya halaman tidak penuh teks tapi detail tetap tersedia."""
+    priority_class = {"Tinggi": "badge-danger", "Sedang": "badge-warning", "Rendah": "badge-info"}.get(rec["priority"], "badge-neutral")
+    desc = rec.get("description", "")
+    first_sentence = desc.split(". ")[0].rstrip(".") + "." if desc else ""
+    return html.Div([
+        html.Div([
+            html.Span(rec["priority"], className=f"badge {priority_class}"),
+            html.Span(rec["category"], className="badge badge-neutral"),
+        ], className="rule-badges"),
+        html.H4(rec["title"], className="rec-title"),
+        html.P(first_sentence, className="rec-punch"),
+        html.Div(id={"type": "rec-relevance-live", "index": rec["id"]}, className="rec-relevance-live-slot"),
+        html.Details([
+            html.Summary("Lihat detail"),
+            html.P(desc, className="segment-text"),
+            html.Div([html.B("Berdasarkan: "), rec["evidence"]], className="rec-evidence"),
+        ], className="rec-details"),
     ], className="recommendation-card")
 
 

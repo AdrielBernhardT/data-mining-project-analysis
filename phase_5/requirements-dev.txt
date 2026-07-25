@@ -6,3 +6,8 @@
 mlxtend>=0.23
 scikit-learn>=1.4
 scipy>=1.13
+
+# Untuk tools/build_segment_projection.py (scatter segmen di halaman Segmentasi).
+# umap-learn OPSIONAL - kalau tidak terpasang, skrip otomatis fallback ke t-SNE
+# (scikit-learn, sudah ada di atas). Install kalau mau proyeksi UMAP:
+umap-learn>=0.5

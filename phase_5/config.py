@@ -13,82 +13,67 @@ dikarang ulang - lihat berkas NOTES.md pada proses pengerjaan.
 from __future__ import annotations
 import os
 
-# ---------------------------------------------------------------------------
-# BACKEND & PATH
-# ---------------------------------------------------------------------------
 ELASTICSEARCH_URL = os.environ.get("ELASTICSEARCH_URL", "http://localhost:9200")
-ES_INDEX_TRANSAKSI = "fance_transaksi"
-ES_INDEX_POLA = "fance_pola_asosiasi"
-FORCE_BACKEND = os.environ.get("FANCE_BACKEND", "").lower()  # "elasticsearch" | "duckdb" | ""
+ES_INDEX_TRANSAKSI = "paysim_transaksi"
+ES_INDEX_POLA = "paysim_pola_asosiasi"
+FORCE_BACKEND = os.environ.get("PAYSIM_BACKEND", "").lower()
 
-DATA_DIR = os.environ.get("FANCE_DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
-DUCKDB_PATH = os.path.join(DATA_DIR, "fance_dashboard.duckdb")
+DATA_DIR = os.environ.get("PAYSIM_DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
+DUCKDB_PATH = os.path.join(DATA_DIR, "paysim_dashboard.duckdb")
 
-# ---------------------------------------------------------------------------
-# SEGMEN NASABAH / TRANSAKSI (4 segmen, hasil KMeans Phase 2 - JANGAN diubah
-# jumlah maupun urutannya, ini hasil analisis, bukan preferensi tampilan)
-# ---------------------------------------------------------------------------
 SEGMENT_NAMES = {
-    0: "Transfer Bernilai Sangat Tinggi (Eksepsional)",
-    1: "Perbankan Harian Utama",
-    2: "Setor Tunai Bersaldo Tinggi",
-    3: "Setor Tunai Bersaldo Sangat Tinggi",
+    0: "Tarik Tunai Volume Besar",
+    1: "Pembayaran Merchant (Risiko Tertinggi)",
+    2: "Transaksi Campuran",
+    3: "Setor Tunai Bersaldo Tinggi",
+    4: "Pembayaran Merchant Nominal Kecil",
 }
 
 SEGMENT_PROFILE = {
-    0: "Segmen yang sangat kecil, didominasi oleh perilaku transfer bernilai tinggi "
-       "yang tidak wajar dan ketidaksesuaian saldo. Tidak berlabel fraud secara "
-       "historis, namun penting untuk dipantau secara operasional.",
-    1: "Populasi transaksi inti dengan aktivitas campuran: pembayaran, tarik tunai, "
-       "setor tunai, dan transfer. Fraud muncul di sini karena kelompok ini sangat "
-       "besar, namun tingkat kejadiannya mendekati rata-rata keseluruhan (baseline).",
-    2: "Kelompok yang didominasi setor tunai dengan saldo awal pengirim sangat "
-       "tinggi. Lebih tepat dibaca sebagai segmen perilaku likuiditas dibanding "
-       "segmen fraud.",
-    3: "Kelompok setor tunai lebih kecil dengan saldo awal sangat tinggi dan "
-       "keterlibatan merchant yang rendah.",
+    0: "Segmen terbesar (32,7% populasi), didominasi transaksi tarik tunai "
+       "(CASH_OUT ~80%) antar sesama akun nasabah. Hampir separuh transaksinya "
+       "menguras saldo pengirim hingga nol. Tingkat fraud sangat rendah, namun "
+       "volumenya besar sehingga penting sebagai populasi acuan operasional.",
+    1: "Kelompok pembayaran ke merchant (PAYMENT ~78%) dengan ketidaksesuaian "
+       "saldo pengirim yang sangat rendah. Meski bukan segmen terbesar, tingkat "
+       "fraud-nya TERTINGGI di antara semua segmen (jauh di atas baseline) - "
+       "segmen paling layak diprioritaskan untuk pemantauan fraud.",
+    2: "Segmen paling heterogen: campuran tarik tunai, setor tunai, dan "
+       "pembayaran tanpa satu jenis yang benar-benar dominan. Berguna sebagai "
+       "kelompok perilaku transaksi umum yang tidak masuk pola spesifik lain.",
+    3: "Kelompok yang hampir seluruhnya setor tunai (CASH_IN ~99,6%) dengan "
+       "saldo awal pengirim di atas rata-rata. Lebih tepat dibaca sebagai "
+       "segmen perilaku likuiditas dibanding segmen fraud (fraud sangat rendah).",
+    4: "Kelompok pembayaran ke merchant (PAYMENT ~99,2%) bernominal kecil dengan "
+       "saldo pengirim rendah. Nyaris tidak ada fraud - profil transaksi ritel "
+       "rutin bernilai rendah.",
 }
 
 SEGMENT_VALUE = {
-    0: "Gunakan sebagai antrean pemantauan khusus (exception queue), bukan sebagai segmen nasabah massal.",
-    1: "Gunakan sebagai populasi acuan (baseline) untuk pemantauan dan perbandingan kebijakan.",
-    2: "Berguna untuk memantau perilaku pendanaan bersaldo tinggi dan aturan terkait saldo.",
-    3: "Berguna untuk memisahkan perilaku setor tunai bersaldo sangat tinggi dari transaksi biasa.",
+    0: "Gunakan sebagai populasi acuan (baseline) tarik tunai untuk perbandingan kebijakan.",
+    1: "Prioritaskan untuk aturan pemantauan/review fraud - konsentrasi fraud tertinggi.",
+    2: "Berguna sebagai kelompok perilaku umum; pantau bila ada pergeseran komposisi jenis transaksi.",
+    3: "Berguna untuk memantau perilaku pendanaan/likuiditas setor tunai bersaldo tinggi.",
+    4: "Cocok sebagai kelompok transaksi ritel rutin bernilai rendah dengan risiko minimal.",
 }
 
 SEGMENT_BEHAVIOR = {
-    0: "Nominal transfer besar dan ketidaksesuaian saldo tujuan yang tinggi",
-    1: "Perilaku transaksi campuran yang biasa dan wajar",
-    2: "Transaksi setor tunai dengan saldo pengirim sangat tinggi",
-    3: "Transaksi setor tunai dengan saldo sangat tinggi",
+    0: "Tarik tunai antar nasabah, sebagian besar menguras saldo pengirim",
+    1: "Pembayaran ke merchant dengan ketidaksesuaian saldo pengirim rendah",
+    2: "Perilaku transaksi campuran tanpa jenis dominan tunggal",
+    3: "Setor tunai dengan saldo awal pengirim tinggi",
+    4: "Pembayaran ke merchant bernominal kecil",
 }
 
-SEGMENT_ICON = {0: "⚠️", 1: "🏦", 2: "💰", 3: "💰"}
+SEGMENT_ICON = {0: "💸", 1: "⚠️", 2: "🔀", 3: "💰", 4: "🛒"}
 
-# ---------------------------------------------------------------------------
-# DIMENSI SPASIAL (ILUSTRATIF)
-# ---------------------------------------------------------------------------
-# Dataset PaySim asli TIDAK memiliki atribut geografis. Dosen mengizinkan
-# slicing spasial menggantikan slicing temporal (dataset ini tidak punya atribut
-# temporal yang bisa dipakai secara bermakna). Kolom "wilayah" berikut adalah
-# dimensi ilustratif yang ditempelkan pipeline untuk mendemonstrasikan
-# kemampuan filter spasial - BUKAN data geografis asli dari PaySim. Ini
-# ditampilkan secara transparan di dashboard (lihat badge "Tentang data
-# wilayah" pada setiap halaman yang memakainya).
-WILAYAH_LIST = [
-    "Jabodetabek", "Jawa Barat", "Jawa Tengah & DIY", "Jawa Timur",
-    "Sumatera", "Kalimantan", "Sulawesi & Maluku", "Bali & Nusa Tenggara",
-]
-WILAYAH_DISCLOSURE = (
-    "Dataset PaySim asli tidak menyertakan atribut geografis. Kolom \u201cWilayah\u201d "
-    "di dashboard ini adalah dimensi ilustratif yang ditambahkan pipeline (deterministik, "
-    "diturunkan dari atribut transaksi yang ada) untuk mendemonstrasikan kebutuhan filter "
-    "spasial sesuai arahan dosen — bukan data lokasi asli dari PaySim."
-)
 
-# ---------------------------------------------------------------------------
-# JENIS TRANSAKSI
-# ---------------------------------------------------------------------------
+DEST_TYPE_LIST = ["Merchant", "Nasabah"]
+DEST_TYPE_DESC = "Merchant = tujuan berupa akun bisnis (prefix 'M' pada ID tujuan asli). Nasabah = tujuan berupa akun perorangan (prefix 'C')."
+
+DRAIN_STATUS_LIST = ["Terkuras Habis", "Tidak Terkuras"]
+DRAIN_STATUS_DESC = "'Terkuras Habis' berarti saldo pengirim menjadi Rp0 tepat setelah transaksi ini - pola yang relevan untuk kasus pengurasan akun (account takeover)."
+
 TRANSACTION_TYPE_LABELS = {
     "CASH_IN": "Setor Tunai",
     "CASH_OUT": "Tarik Tunai",
@@ -103,18 +88,11 @@ def humanize_transaction_type(value) -> str:
     return TRANSACTION_TYPE_LABELS.get(key, str(value).replace("_", " ").title())
 
 
-# ---------------------------------------------------------------------------
-# RISIKO
-# ---------------------------------------------------------------------------
 RISK_LEVELS = ["Normal", "Rendah", "Sedang", "Tinggi", "Kritis"]
 RISK_SCORE_TO_LEVEL = {0: "Normal", 1: "Rendah", 2: "Sedang", 3: "Tinggi", 4: "Tinggi", 5: "Kritis", 6: "Kritis"}
 HIGH_RISK_THRESHOLD = 3
 CRITICAL_RISK_THRESHOLD = 5
 
-# Data Phase 1-4 ASLI (fisik dari phase_4.py) memakai string kategori berbahasa
-# Inggris (risk_level, anomaly_type, investigation_category). Pipeline (lihat
-# pipeline/enrich.py) menerjemahkannya ke Indonesia lewat mapping berikut -
-# JANGAN diubah tanpa mengubah phase_4.py juga, supaya tetap konsisten.
 RISK_LEVEL_EN_TO_ID = {"Normal": "Normal", "Low": "Rendah", "Medium": "Sedang", "High": "Tinggi", "Critical": "Kritis"}
 ANOMALY_TYPE_EN_TO_ID = {
     "No Statistical Anomaly": "Tidak Ada Anomali Statistik",
@@ -142,9 +120,6 @@ RISK_LEVEL_DESC = {
     "Kritis": "Hampir seluruh indikator anomali terpicu bersamaan.",
 }
 
-# ---------------------------------------------------------------------------
-# JENIS ANOMALI & KATEGORI INVESTIGASI (hasil klasifikasi Phase 4, apa adanya)
-# ---------------------------------------------------------------------------
 ANOMALY_TYPE_LABELS = [
     "Tidak Ada Anomali Statistik",
     "Ketidaksesuaian Saldo",
@@ -174,10 +149,6 @@ INVESTIGATION_CATEGORY_LABELS = [
     "Transaksi Sah yang Jarang Terjadi",
 ]
 
-# ---------------------------------------------------------------------------
-# 5 METODE DETEKSI ANOMALI - dipakai halaman /anomali utk menjelaskan
-# "fitur apa yang membentuk setiap flag" & justifikasi memakai multi-metode
-# ---------------------------------------------------------------------------
 ANOMALY_METHODS = [
     dict(
         key="flag_IQR", nama="IQR (Interquartile Range)", bobot=1, kategori="Univariat",
@@ -223,26 +194,20 @@ ANOMALY_JUSTIFICATION = (
     "BIRCH+HDBSCAN melihat seluruh struktur data hasil rekayasa fitur, sehingga bisa menandai "
     "transaksi yang menyimpang dari populasi walau nominalnya sendiri tidak ekstrem. Kajian "
     "tumpang-tindih antar metode membuktikan manfaat pendekatan ini: dari seluruh transaksi yang "
-    "ditandai BIRCH+HDBSCAN, sebagian besar TIDAK pernah ditandai oleh IQR — artinya mengandalkan "
+    "ditandai BIRCH+HDBSCAN, sebagian besar TIDAK pernah ditandai oleh IQR: artinya mengandalkan "
     "satu metode berbasis nominal saja akan melewatkan kelompok transaksi ini sepenuhnya. Skor "
     "risiko akhir (0-6) adalah gabungan berbobot dari keempat metode ini, lalu divalidasi terhadap "
     "label fraud historis (lihat metrik validasi pada halaman Anomali)."
 )
 
-# ---------------------------------------------------------------------------
-# KELOMPOK POLA (association rules) - dipakai chip filter halaman /pola
-# ---------------------------------------------------------------------------
 RULE_GROUP_FRAUD = "Pola Fraud"
 RULE_GROUP_SEGMENT = "Pola Segmen"
 RULE_GROUP_OUTLIER = "Pola Outlier"
 RULE_GROUP_GENERAL = "Perilaku Umum"
 RULE_GROUP_ORDER = [RULE_GROUP_FRAUD, RULE_GROUP_SEGMENT, RULE_GROUP_OUTLIER, RULE_GROUP_GENERAL]
 
-# ---------------------------------------------------------------------------
-# LABEL ITEM (utk menerjemahkan antecedent/consequent aturan asosiasi)
-# ---------------------------------------------------------------------------
 def _segment_item_labels():
-    return {f"cluster_kmeans_{i}": f"Segmen {i} — {SEGMENT_NAMES[i]}" for i in SEGMENT_NAMES}
+    return {f"cluster_kmeans_{i}": f"Segmen {i}: {SEGMENT_NAMES[i]}" for i in SEGMENT_NAMES}
 
 
 ITEM_LABELS = {
@@ -299,20 +264,17 @@ def humanize_item_list(items) -> str:
     else:
         parts = [humanize_item(p) for p in items]
     if not parts:
-        return "—"
+        return "-"
     if len(parts) == 1:
         return parts[0]
     return " DAN ".join(parts)
 
 
-# ---------------------------------------------------------------------------
-# FORMAT ANGKA (gaya Indonesia)
-# ---------------------------------------------------------------------------
 def format_pct(value, decimals: int = 2) -> str:
     try:
         v = float(value)
     except (TypeError, ValueError):
-        return "—"
+        return "-"
     return f"{v * 100:.{decimals}f}%".replace(".", ",")
 
 
@@ -320,14 +282,14 @@ def format_int(value) -> str:
     try:
         return f"{int(round(float(value))):,}".replace(",", ".")
     except (TypeError, ValueError):
-        return "—"
+        return "-"
 
 
 def format_rupiah(value, decimals: int = 0) -> str:
     try:
         v = float(value)
     except (TypeError, ValueError):
-        return "—"
+        return "-"
     s = f"{v:,.{decimals}f}"
     s = s.replace(",", "_").replace(".", ",").replace("_", ".")
     return f"Rp{s}"
@@ -337,7 +299,7 @@ def format_multiplier(value) -> str:
     try:
         v = float(value)
     except (TypeError, ValueError):
-        return "—"
+        return "-"
     return f"{v:,.1f}x".replace(".", ",")
 
 
@@ -345,27 +307,49 @@ def day_from_step(step) -> str:
     try:
         step_int = int(step)
     except (TypeError, ValueError):
-        return "—"
+        return "-"
     day = (step_int - 1) // 24 + 1
     hour = (step_int - 1) % 24
     return f"Hari ke-{day}, {hour:02d}:00"
 
 
-# ---------------------------------------------------------------------------
-# REKOMENDASI BISNIS - setiap butir terikat ke temuan nyata (segmen/pola/
-# anomali tertentu) supaya bisa dihitung ulang relevansinya sesuai filter aktif
-# (lihat pages/rekomendasi.py) - bukan daftar generik.
-# ---------------------------------------------------------------------------
+PHASE1_FINDINGS = [
+    dict(icon="🔒", title="Datanya bersih dan rapi",
+         text="Tidak ada transaksi kembar, tidak ada angka minus yang aneh, dan tidak ada transaksi ke rekening sendiri. Data siap dianalisis."),
+    dict(icon="🆔", title="Penomoran rekening konsisten",
+         text="Pengirim selalu nasabah biasa; penerima bisa nasabah atau toko. Toko tidak pernah jadi pengirim: polanya rapi."),
+    dict(icon="📅", title="Rentang waktu hampir penuh",
+         text="Data mencakup 743 dari 744 jam. Yang satu itu memang batas akhir simulasi, bukan data yang hilang."),
+    dict(icon="🏪", title="Saldo toko selalu nol",
+         text="Ini bawaan simulator, bukan data rusak. Artinya jumlah pembayaran = jumlah transaksi yang masuk ke toko."),
+    dict(icon="⚖️", title="Saldo penerima sering tak cocok: dan itu petunjuk",
+         text="Di 66% transaksi, saldo penerima tidak sesuai hitungan. Sekitar separuh penipuan ada di kelompok ini, jadi ini kami jadikan petunjuk penting."),
+    dict(icon="🔍", title="Cuma 2 transaksi ganjil di sisi pengirim",
+         text="Dua transaksi yang saldonya malah naik setelah mengirim uang: terlalu sedikit untuk berpengaruh, jadi diabaikan."),
+    dict(icon="📥", title="Saldo penerima turun jarang berarti penipuan",
+         text="Ada 44 ribu transaksi yang saldonya turun setelah menerima uang, tapi hampir semua normal. Ini ciri simulator, bukan tanda penipuan."),
+    dict(icon="🎯", title="Penipuan cuma di dua jenis transaksi",
+         text="Penipuan HANYA muncul saat menarik tunai dan transfer. Tidak pernah di setor tunai, pembayaran, atau debit. Ini mempersempit pencarian kami."),
+    dict(icon="🛡️", title="Toko tidak pernah jadi korban",
+         text="Semua transaksi menuju toko aman. Penipuan hanya terjadi antar sesama nasabah."),
+    dict(icon="💧", title="Menguras saldo habis = tanda bahaya besar",
+         text="Transaksi yang menyedot saldo pengirim sampai nol hampir 140× lebih mungkin penipuan. Ini salah satu petunjuk terkuat kami."),
+    dict(icon="📉", title="Penipuan sangat langka",
+         text="Dari 6,36 juta transaksi, hanya sekitar 8 ribu (0,13%) yang penipuan. Mencari mereka seperti mencari jarum di tumpukan jerami."),
+    dict(icon="🧹", title="16 transaksi kosong dibuang saat pembersihan",
+         text="Ada 16 transaksi bernilai nol rupiah: bukan aktivitas nyata, jadi dihapus. Data akhir jadi 6.362.604 baris."),
+]
+
 RECOMMENDATIONS = [
     dict(
         id="rec-seg0-queue", priority="Tinggi", category="Segmentasi",
         title="Buat antrean pemantauan khusus untuk transaksi bernilai eksepsional",
         description=(
             "Segmen 0 hanya 0,03% dari seluruh transaksi dan 0% berlabel fraud secara historis, tapi "
-            "79% masuk kategori high-risk dengan rata-rata skor 4,66 dari 6 — jauh di atas segmen lain. "
+            "79% masuk kategori high-risk dengan rata-rata skor 4,66 dari 6: jauh di atas segmen lain. "
             "Kalau hanya mengandalkan label fraud historis, kelompok ini akan terlewat sepenuhnya."
         ),
-        evidence="Segmen 0 — Transfer Bernilai Sangat Tinggi: 1.648 transaksi, 79,13% high-risk, 0 fraud historis.",
+        evidence="Segmen 0: Transfer Bernilai Sangat Tinggi: 1.648 transaksi, 79,13% high-risk, 0 fraud historis.",
         related_segment=0, related_anomaly_type=None, related_rule_group=None,
     ),
     dict(
@@ -427,7 +411,7 @@ RECOMMENDATIONS = [
         id="rec-balance-mismatch-dq", priority="Sedang", category="Kualitas Data",
         title="Telusuri akar penyebab 'Ketidaksesuaian Saldo' sebagai isu kualitas data",
         description=(
-            "22,6% dari seluruh transaksi tergolong 'Ketidaksesuaian Saldo' — proporsi yang cukup besar untuk "
+            "22,6% dari seluruh transaksi tergolong 'Ketidaksesuaian Saldo': proporsi yang cukup besar untuk "
             "diasumsikan seluruhnya fraud. Sebagian besar kemungkinan adalah isu pencatatan/timing sistem, "
             "namun proporsi sebesar ini tetap layak ditelusuri akar penyebabnya."
         ),
@@ -438,12 +422,100 @@ RECOMMENDATIONS = [
         id="rec-rare-legit", priority="Rendah", category="Kualitas Data",
         title="Dokumentasikan pola 'Transaksi Sah yang Jarang Terjadi' sebagai pengecualian resmi",
         description=(
-            "Hanya segelintir transaksi masuk kategori ini — kombinasi anomali yang jarang namun terverifikasi "
+            "Hanya segelintir transaksi masuk kategori ini: kombinasi anomali yang jarang namun terverifikasi "
             "bukan fraud. Mendokumentasikannya sebagai pengecualian resmi mencegah tim investigasi mengulang "
             "analisis yang sama di masa depan."
         ),
         evidence="investigation_category: Transaksi Sah yang Jarang Terjadi = hanya 3 transaksi dari 6,3 juta.",
         related_segment=None, related_anomaly_type=None, related_rule_group=None,
     ),
+    dict(
+        id="rec-rule-transfer-drain-chain",
+        priority="Tinggi", category="Pola & Asosiasi",
+        title="Pantau rangkaian TRANSFER lalu CASH_OUT yang menguras saldo",
+        description=(
+            "Pola menunjukkan transaksi TRANSFER kerap diikuti pengurasan saldo pengirim, dan kombinasi "
+            "'saldo terkuras + Segmen 1' berkonfidensi 82,7% menuju fraud. Ini menyerupai pola klasik "
+            "pemindahan dana korban lalu pencairan cepat. Menjadikannya aturan pemantauan rantai (bukan per "
+            "transaksi) bisa menangkap fraud lebih dini, sebelum dana benar-benar keluar."
+        ),
+        evidence="Pola: Segmen 1 + saldo pengirim terkuras -> fraud (confidence 82,7%, lift 642x).",
+        related_segment=1, related_anomaly_type=None, related_rule_group="Pola Fraud",
+    ),
+    dict(
+        id="rec-rule-outlier-confirm",
+        priority="Tinggi", category="Pola & Asosiasi",
+        title="Perlakukan pola berpenanda outlier struktural sebagai sinyal prioritas",
+        description=(
+            "Aturan yang memuat penanda outlier struktural (dari clustering) plus ketidaksesuaian saldo "
+            "tinggi menuju fraud dengan konfidensi sangat tinggi. Karena sinyal ini berasal dari metode yang "
+            "berbeda (clustering) namun menyimpulkan hal yang sama, kesepakatan lintas-metode ini membuat "
+            "polanya sangat layak dipercaya dan dijadikan pemicu review otomatis."
+        ),
+        evidence="Pola: outlier struktural + ketidaksesuaian saldo penerima tinggi -> fraud (confidence 73,3%, lift 569x).",
+        related_segment=None, related_anomaly_type=None, related_rule_group="Pola Outlier",
+    ),
+    dict(
+        id="rec-rule-payment-safe-whitelist",
+        priority="Sedang", category="Pola & Asosiasi",
+        title="Manfaatkan pola PAYMENT-ke-merchant yang bersih untuk mengurangi beban review",
+        description=(
+            "Beberapa pola menunjukkan transaksi PAYMENT ke merchant hampir selalu jatuh ke segmen yang "
+            "sepenuhnya bebas fraud, dengan konfidensi tinggi. Alih-alih hanya mengejar fraud, pola 'aman' "
+            "sekuat ini bisa dipakai sebagai daftar putih (whitelist) untuk melewati review manual, sehingga "
+            "tim bisa memusatkan tenaga ke transaksi yang benar-benar berisiko."
+        ),
+        evidence="Pola: Segmen 4 -> PAYMENT ke merchant + saldo awal sangat rendah (confidence 82,7%, lift 5,67x).",
+        related_segment=4, related_anomaly_type=None, related_rule_group="Pola Segmen",
+    ),
+    dict(
+        id="rec-rule-refresh-cadence",
+        priority="Sedang", category="Pola & Asosiasi",
+        title="Segarkan aturan asosiasi secara berkala mengikuti perubahan perilaku",
+        description=(
+            "Pola fraud yang ditemukan hari ini mencerminkan perilaku pada periode data ini. Penipu berganti "
+            "taktik, sehingga aturan yang kuat sekarang bisa melemah seiring waktu. Menjadwalkan pelatihan "
+            "ulang aturan asosiasi secara berkala menjaga agar daftar pola tetap relevan dan tidak "
+            "mengandalkan pola usang."
+        ),
+        evidence="Total pola tersaring cukup banyak; kekuatan tiap pola bergantung pada periode data saat penambangan.",
+        related_segment=None, related_anomaly_type=None, related_rule_group=None,
+    ),
+    dict(
+        id="rec-combine-score-and-rules",
+        priority="Tinggi", category="Deteksi Anomali",
+        title="Gabungkan skor risiko dengan pencocokan pola untuk prioritas akhir",
+        description=(
+            "Skor risiko menyoroti anomali secara umum, sementara aturan asosiasi menunjuk kombinasi spesifik "
+            "yang terbukti menuju fraud. Menggabungkan keduanya - misalnya menaikkan prioritas transaksi yang "
+            "berskor tinggi DAN cocok pola fraud - menghasilkan antrean investigasi yang jauh lebih tajam "
+            "daripada memakai salah satunya saja."
+        ),
+        evidence="Antrean high-risk memekatkan fraud 24x; pola teratas berkonfidensi hingga 100% (lift 776x).",
+        related_segment=None, related_anomaly_type=None, related_rule_group="Pola Fraud",
+    ),
+    dict(
+        id="rec-focus-segment1-capacity",
+        priority="Tinggi", category="Segmentasi",
+        title="Alokasikan kapasitas investigasi terbesar ke Segmen 1",
+        description=(
+            "Segmen 1 menampung mayoritas fraud dan seluruh transaksi berkategori Kritis. Alih-alih menyebar "
+            "tenaga merata ke semua segmen, memusatkan kapasitas review ke Segmen 1 akan memberi hasil "
+            "tangkapan fraud tertinggi per jam kerja investigator."
+        ),
+        evidence="Segmen 1: menampung bagian terbesar fraud dan 100% transaksi kategori Kritis.",
+        related_segment=1, related_anomaly_type=None, related_rule_group=None,
+    ),
+    dict(
+        id="rec-monitor-drift-metrics",
+        priority="Rendah", category="Kualitas Data",
+        title="Pantau pergeseran proporsi anomali sebagai indikator dini",
+        description=(
+            "Proporsi tiap jenis anomali dan ukuran tiap segmen relatif stabil pada periode ini. Perubahan "
+            "mendadak pada proporsi tersebut - misalnya lonjakan tiba-tiba kategori tertentu - bisa menjadi "
+            "sinyal dini munculnya modus baru, dan layak dipantau sebagai metrik rutin."
+        ),
+        evidence="Distribusi anomali & ukuran segmen konsisten pada periode data; perubahan tajam patut diselidiki.",
+        related_segment=None, related_anomaly_type=None, related_rule_group=None,
+    ),
 ]
-

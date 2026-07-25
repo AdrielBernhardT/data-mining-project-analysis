@@ -24,16 +24,13 @@ import pandas as pd
 from pathlib import Path
 
 RNG_SEED = 42
-N_ROWS = 6_362_604  # sama persis dgn total baris asli (lihat NOTES.md)
+N_ROWS = 6_362_604
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "data" / "raw_synthetic"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 rng = np.random.default_rng(RNG_SEED)
 
-# ---------------------------------------------------------------------------
-# 1) SEGMEN (proporsi & karakteristik PERSIS dari cluster_summary.parquet asli)
-# ---------------------------------------------------------------------------
 SEGMENTS = [
     dict(id=0, n=1_648, fraud_rate=0.0, avg_risk=4.656553, high_risk_rate=0.791262,
          dominant_types={"TRANSFER": 0.85, "CASH_OUT": 0.15}),
@@ -46,40 +43,9 @@ SEGMENTS = [
 ]
 assert sum(s["n"] for s in SEGMENTS) == N_ROWS
 
-# ---------------------------------------------------------------------------
-# 2) WILAYAH SINTETIS (dimensi spasial ilustratif - dataset asli TIDAK punya
-#    atribut geografis, lihat NOTES.md / README). Dibuat deterministik & sedikit
-#    berkorelasi dgn risiko supaya filter spasial terasa nyata saat didemokan,
-#    tapi ditandai jelas di UI sbg simulasi.
-# ---------------------------------------------------------------------------
-WILAYAH_LIST = [
-    "Jabodetabek", "Jawa Barat", "Jawa Tengah & DIY", "Jawa Timur",
-    "Sumatera", "Kalimantan", "Sulawesi & Maluku", "Bali & Nusa Tenggara",
-]
-WILAYAH_BASE_W = np.array([0.22, 0.15, 0.12, 0.14, 0.18, 0.08, 0.07, 0.04])
-# sedikit pemiringan per segmen supaya pola spasial ada saat difilter
-WILAYAH_TILT = {
-    0: np.array([1.6, 1.1, 0.8, 0.9, 1.3, 0.6, 0.5, 0.4]),   # transfer besar -> condong kota besar
-    1: np.ones(8),
-    2: np.array([0.9, 1.0, 1.1, 1.0, 1.2, 1.0, 0.9, 0.8]),
-    3: np.array([0.9, 1.0, 1.1, 1.0, 1.2, 1.0, 0.9, 0.8]),
-}
 
-
-def sample_wilayah(seg_id: int, n: int) -> np.ndarray:
-    w = WILAYAH_BASE_W * WILAYAH_TILT[seg_id]
-    w = w / w.sum()
-    return rng.choice(WILAYAH_LIST, size=n, p=w)
-
-
-# ---------------------------------------------------------------------------
-# 3) RISK SCORE per segmen (kalibrasi manual supaya avg & high_risk_rate per
-#    segmen MENDEKATI angka asli, sekaligus reproduksi temuan "score=2 (Sedang)
-#    fraud rate-nya lebih tinggi dari score=6 (Kritis)")
-# ---------------------------------------------------------------------------
-# distribusi score 0-6 per segmen, dikalibrasi lewat trial supaya rata2 & high-risk rate cocok
 SCORE_DIST = {
-    0: np.array([0.05, 0.05, 0.11, 0.05, 0.08, 0.05, 0.61]),   # avg~4.65, P(score>=3)~79%
+    0: np.array([0.05, 0.05, 0.11, 0.05, 0.08, 0.05, 0.61]),
     1: np.array([0.9542, 0.0350, 0.00030, 0.00320, 0.00650, 0.0000145, 0.00079]),
     2: np.array([0.9700, 0.0100, 0.00013, 0.01260, 0.00600, 0.0000, 0.00127]),
     3: np.array([0.9714, 0.0120, 0.00013, 0.00960, 0.00560, 0.0000, 0.00127]),
@@ -87,7 +53,6 @@ SCORE_DIST = {
 for k in SCORE_DIST:
     SCORE_DIST[k] = SCORE_DIST[k] / SCORE_DIST[k].sum()
 
-# fraud rate KONDISIONAL per risk_score, dari fraud_by_score.parquet ASLI
 FRAUD_RATE_BY_SCORE = {
     0: 0.000721, 1: 0.006203, 2: 0.443161, 3: 0.024223,
     4: 0.008904, 5: 0.0, 6: 0.207090,
@@ -95,8 +60,6 @@ FRAUD_RATE_BY_SCORE = {
 
 RISK_LEVEL_ID = {0: "Normal", 1: "Rendah", 2: "Sedang", 3: "Tinggi", 4: "Tinggi", 5: "Kritis", 6: "Kritis"}
 
-# Dekomposisi score -> kombinasi flag (bobot IQR=1, ZScore=1, IsoForest=2, HDBSCAN=2),
-# proporsi tiap kombinasi mengikuti besar relatif method_overlap.parquet ASLI.
 SCORE_FLAG_COMBOS = {
     0: [((False, False, False, False), 1.0)],
     1: [((True, False, False, False), 0.90), ((False, True, False, False), 0.10)],
@@ -112,14 +75,9 @@ def sample_flags_for_score(score: int, n: int) -> np.ndarray:
     combos, weights = zip(*SCORE_FLAG_COMBOS[score])
     weights = np.array(weights) / np.sum(weights)
     idx = rng.choice(len(combos), size=n, p=weights)
-    arr = np.array(combos)[idx]  # (n, 4) bool
+    arr = np.array(combos)[idx]
     return arr
 
-
-# ---------------------------------------------------------------------------
-# 4) Kategori anomali & investigasi - MENIRU PERSIS logika phase_4.py asli
-#    (lihat NOTES.md) dari kombinasi flag, bukan dikarang independen.
-# ---------------------------------------------------------------------------
 
 def classify_anomaly(flag_iqr, flag_z, flag_iso, flag_hdb, flag_balance):
     n_flags = flag_iqr.astype(int) + flag_z.astype(int) + flag_iso.astype(int) + flag_hdb.astype(int)
@@ -149,15 +107,12 @@ def main():
         n = seg["n"]
         seg_id = seg["id"]
 
-        # --- tipe transaksi sesuai profil segmen ---
         types, probs = zip(*seg["dominant_types"].items())
         probs = np.array(probs) / np.sum(probs)
         tx_type = rng.choice(types, size=n, p=probs)
 
-        # --- risk score sesuai kalibrasi segmen ---
         score = rng.choice(np.arange(7), size=n, p=SCORE_DIST[seg_id])
 
-        # --- flags turunan dari score ---
         flags = np.zeros((n, 4), dtype=bool)
         for s in range(7):
             mask = score == s
@@ -166,29 +121,24 @@ def main():
                 flags[mask] = sample_flags_for_score(s, cnt)
         flag_iqr, flag_z, flag_iso, flag_hdb = flags[:, 0], flags[:, 1], flags[:, 2], flags[:, 3]
 
-        # --- balance mismatch flag (independen, dipakai utk anomaly_type Balance Mismatch) ---
         base_balance_rate = 0.226 if seg_id == 1 else (0.05 if seg_id == 0 else 0.10)
         flag_balance = rng.random(n) < base_balance_rate
-        flag_balance = flag_balance & (score <= 1)  # jangan tabrakan dgn kombinasi flag tinggi
+        flag_balance = flag_balance & (score <= 1)
 
-        # --- fraud, kondisional pada risk_score (mereproduksi temuan Sedang>Kritis) ---
         p_fraud = np.vectorize(FRAUD_RATE_BY_SCORE.get)(score).astype(float)
         is_fraud = rng.random(n) < p_fraud
-        # segmen 0 secara historis TIDAK PERNAH berlabel fraud (lihat NOTES.md)
         if seg_id == 0:
             is_fraud[:] = False
 
-        # --- nominal transaksi (dalam satuan mata uang dataset, skala mendekati PaySim asli) ---
         if seg_id == 0:
-            amount = rng.lognormal(mean=15.5, sigma=0.9, size=n)          # transfer sangat besar
+            amount = rng.lognormal(mean=15.5, sigma=0.9, size=n)
             old_orig = rng.lognormal(mean=13.5, sigma=1.3, size=n)
         elif seg_id in (2, 3):
             amount = rng.lognormal(mean=10.5, sigma=1.4, size=n)
-            old_orig = rng.lognormal(mean=15.0, sigma=1.0, size=n)        # saldo awal sangat tinggi
+            old_orig = rng.lognormal(mean=15.0, sigma=1.0, size=n)
         else:
             amount = rng.lognormal(mean=9.6, sigma=1.6, size=n)
             old_orig = rng.lognormal(mean=9.0, sigma=1.8, size=n)
-        # transaksi berisiko tinggi cenderung py lebih ekstrem nominalnya
         boost = 1 + (score / 6.0) * rng.uniform(0.5, 3.0, size=n)
         amount = amount * boost
         old_dest = rng.lognormal(mean=10.0, sigma=2.0, size=n)
@@ -199,7 +149,8 @@ def main():
         is_dest_merchant = rng.random(n) < (0.35 if seg_id == 1 else 0.05)
 
         step = rng.integers(1, 744, size=n)
-        wilayah = sample_wilayah(seg_id, n)
+        jenis_tujuan = np.where(is_dest_merchant, "Merchant", "Nasabah")
+        status_kuras = np.where(orig_drained, "Terkuras Habis", "Tidak Terkuras")
 
         df = pd.DataFrame({
             "transaction_id": [f"TX{v:08d}" for v in range(tx_offset, tx_offset + n)],
@@ -220,7 +171,8 @@ def main():
             "flag_BalanceMismatch": flag_balance,
             "risk_score": score.astype(np.int8),
             "isFraud": is_fraud,
-            "wilayah": wilayah,
+            "jenis_tujuan": jenis_tujuan,
+            "status_kuras": status_kuras,
         })
         chunks.append(df)
         tx_offset += n
@@ -229,7 +181,6 @@ def main():
     full = pd.concat(chunks, ignore_index=True)
     del chunks
 
-    # shuffle supaya urutan baris tidak berdasar-segmen (lebih realistis)
     full = full.sample(frac=1.0, random_state=RNG_SEED).reset_index(drop=True)
 
     full["risk_level"] = full["risk_score"].map(RISK_LEVEL_ID)
@@ -249,7 +200,6 @@ def main():
         "Menyimpang dari struktur klaster (BIRCH+HDBSCAN)",
         "Ketidaksesuaian saldo asal/tujuan",
     ]
-    # bit-pack 5 flag jadi kode 0-31, siapkan lookup string utk semua 32 kombinasi sekali saja
     code = (
         full["flag_IQR"].values.astype(np.int8) * 1
         + full["flag_ZScore"].values.astype(np.int8) * 2
@@ -272,7 +222,6 @@ def main():
     full.sample(n=min(150_000, len(full)), random_state=7).to_parquet(sample_path, index=False)
     print(f"Tersimpan (sampel utk rule mining): {sample_path}")
 
-    # ---- ringkasan cepat utk verifikasi terhadap NOTES.md ----
     print("\n--- verifikasi cepat ---")
     print("total baris:", len(full))
     print("fraud rate keseluruhan:", full["isFraud"].mean())
