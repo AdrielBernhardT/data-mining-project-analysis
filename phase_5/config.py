@@ -1,15 +1,3 @@
-"""
-config.py
-=========
-Satu sumber kebenaran untuk semua label bisnis berbahasa Indonesia, ambang batas
-risiko, dan daftar dimensi filter (termasuk dimensi spasial). Dipakai bersama
-oleh pipeline (pipeline/flow.py) dan seluruh halaman dashboard supaya istilah
-yang tampil ke pengguna selalu konsisten.
-
-Angka-angka referensi (business_profile, main_behavior, dst.) diterjemahkan
-APA ADANYA dari hasil analisis Phase 1-4 kelompok (lihat cache asli), bukan
-dikarang ulang - lihat berkas NOTES.md pada proses pengerjaan.
-"""
 from __future__ import annotations
 import os
 

@@ -1,22 +1,3 @@
-"""
-generate_synthetic_data.py
-===========================
-INI BUKAN BAGIAN DARI DASHBOARD PRODUKSI. Skrip ini hanya dipakai untuk membuat
-dataset uji (~6.3 juta baris) yang meniru statistik AGREGAT asli dari cache
-Phase 5 kelompok (cluster_summary, risk_summary, anomaly_type_summary,
-fraud_by_score, method_overlap, dst - lihat NOTES.md) karena file mentah
-Phase 1-4 (6.3 juta baris) tidak ikut ter-upload, hanya ringkasannya.
-
-Tujuannya SEMATA untuk:
-1. Menguji pipeline Prefect + backend DuckDB/Elasticsearch end-to-end dengan
-   volume data yang sebenarnya (6.3 juta), termasuk mengukur performa nyata.
-2. Menjalankan ulang apriori (mlxtend) secara REAL di atas data ini supaya fitur
-   "10 pola utama + sisanya tetap bisa diakses" bisa diuji dengan pool pola yang
-   benar-benar dihitung (bukan dikarang manual).
-
-Begitu kelompok menjalankan pipeline asli (pipeline/flow.py) terhadap output
-Phase 1-4 mereka sendiri, skrip ini tidak lagi relevan/dipakai.
-"""
 from __future__ import annotations
 
 import numpy as np

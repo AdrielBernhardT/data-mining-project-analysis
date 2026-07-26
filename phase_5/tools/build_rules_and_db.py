@@ -1,17 +1,3 @@
-"""
-tools/build_rules_and_db.py  (skrip pengembangan/uji, BUKAN bagian pipeline resmi)
-====================================================================================
-1. Menjalankan ULANG apriori (mlxtend) memakai metodologi & parameter yang PERSIS
-   sama dengan Phase 3 asli (lihat NOTES.md) di atas sampel data sintetis, supaya
-   ada pool pola yang lebih besar dari 10 untuk menguji fitur "10 pola utama +
-   selebihnya tetap bisa diakses & dicari".
-2. 10 pola TERATAS tetap memakai angka ASLI dari top_rules_business.parquet
-   (tidak diganti data sintetis) - dikunci sebagai is_top10=True.
-3. Menulis semuanya ke satu berkas paysim_dashboard.duckdb yang dipakai app.py.
-
-Pipeline resmi (pipeline/flow.py) melakukan hal yang serupa terhadap data ASLI
-kelompok saat dijalankan di komputer mereka sendiri.
-"""
 from __future__ import annotations
 
 import sys

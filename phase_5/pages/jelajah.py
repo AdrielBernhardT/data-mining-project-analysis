@@ -1,10 +1,3 @@
-"""
-pages/jelajah.py - Jelajah Data
-Halaman pamer utama utk kebutuhan "searching dan filtering interaktif" dan
-target "<100ms walau 6,3 juta baris". Latensi query yang SESUNGGUHNYA diukur
-tiap kali filter berubah dan ditampilkan langsung ke pengguna (bukan klaim di
-atas kertas) - lihat badge performa di bawah filter bar.
-"""
 from __future__ import annotations
 
 import time

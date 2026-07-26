@@ -1,19 +1,3 @@
-"""
-app.py
-=======
-Entry point dashboard. Menjalankan:
-
-    python app.py
-
-Backend data dipilih OTOMATIS saat startup:
-1) Coba Elasticsearch (ELASTICSEARCH_URL, default http://localhost:9200).
-2) Kalau tidak terjangkau, otomatis pakai DuckDB (data/paysim_dashboard.duckdb).
-Status backend yang aktif ditampilkan di badge pojok kanan atas setiap halaman
-supaya transparan ke pengguna (dan dosen) data sedang dilayani dari mana.
-
-Jalankan `python -m pipeline.flow --mode synthetic` (atau --mode real) dulu
-kalau data/paysim_dashboard.duckdb belum ada.
-"""
 from __future__ import annotations
 
 import logging
@@ -31,9 +15,6 @@ logger = logging.getLogger("paysim-dashboard")
 
 
 def pilih_backend() -> DataBackend:
-    """Coba Elasticsearch dulu (sesuai permintaan awal proyek), fallback ke
-    DuckDB kalau tidak menyala - dashboard TIDAK PERNAH gagal total hanya
-    karena satu servis mati."""
     import logging as _logging
     _logging.getLogger("elastic_transport").setLevel(_logging.CRITICAL)
 

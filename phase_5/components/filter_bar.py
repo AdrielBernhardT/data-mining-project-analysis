@@ -1,16 +1,3 @@
-"""
-components/filter_bar.py
-==========================
-Filter bar (slicer) yang konsisten di semua halaman - menjawab catatan dosen
-"setiap page at least ada slicernya".
-
-Dataset PaySim tidak punya atribut spasial maupun temporal yang bermakna
-(sudah dicek ulang - lihat config.py), jadi filter di sini semuanya diturunkan
-dari atribut yang BENAR-BENAR ADA di data: jenis tujuan transaksi (Merchant/
-Nasabah, dari isDestMerchant), status saldo terkuras (dari origDrainedToZero),
-segmen, jenis transaksi, level risiko, jenis anomali, kategori investigasi,
-dan pencarian bebas.
-"""
 from __future__ import annotations
 
 from dash import dcc, html

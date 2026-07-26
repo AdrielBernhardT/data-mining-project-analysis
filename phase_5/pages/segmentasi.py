@@ -1,11 +1,3 @@
-"""
-pages/segmentasi.py - Segmentasi Nasabah
-
-Fokus: scatter proyeksi (UMAP/t-SNE) sebagai anchor visual yang membuat
-pemisahan 5 segmen langsung terlihat, walau untuk orang non-teknis. Teks
-dipangkas, grafik interaktif diutamakan. Klik kartu segmen -> semua grafik
-(termasuk scatter) menyorot segmen itu.
-"""
 from __future__ import annotations
 
 import dash

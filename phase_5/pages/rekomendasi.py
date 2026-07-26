@@ -1,10 +1,3 @@
-"""
-pages/rekomendasi.py - Rekomendasi Bisnis
-
-Teks dipangkas: kartu ringkas (judul + satu kalimat inti), detail di balik
-'Lihat detail'. Peta rekomendasi interaktif (prioritas x kategori) sebagai
-anchor visual. Relevansi tiap rekomendasi tetap dihitung ulang ikut filter.
-"""
 from __future__ import annotations
 
 import dash

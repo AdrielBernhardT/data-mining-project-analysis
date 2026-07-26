@@ -7,3 +7,4 @@ data/raw_synthetic/
 data/_work/
 venv/
 .DS_Store
+.zip

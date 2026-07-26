@@ -1,9 +1,3 @@
-"""
-pipeline/es_indexer.py
-========================
-Definisi mapping index Elasticsearch & fungsi bulk-index. Dipanggil oleh
-pipeline/flow.py. Dipisah supaya mapping mudah ditinjau/diaudit sendiri.
-"""
 from __future__ import annotations
 
 from typing import Iterable

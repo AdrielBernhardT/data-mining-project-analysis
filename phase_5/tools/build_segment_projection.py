@@ -1,35 +1,3 @@
-"""
-tools/build_segment_projection.py
-=================================
-Menghasilkan koordinat proyeksi (UMAP / t-SNE) untuk visualisasi scatter
-segmen di halaman Segmentasi Nasabah dashboard. Default 3D (bisa diputar).
-
-KENAPA PERLU: scatter plot butuh koordinat (x, y) per titik. Menjalankan
-UMAP/t-SNE pada 6,3 juta baris tidak feasible (berjam-jam + browser tak sanggup
-render sejuta titik). Skrip ini MENGAMBIL SAMPEL stratified 5.000 titik per
-segmen (~25 ribu total), menghitung proyeksi di sampel itu, lalu menyimpannya
-sebagai parquet kecil yang dibaca pipeline phase 5.
-
-CARA PAKAI (jalankan sekali di mesin yang punya data phase 4):
-
-    python tools/build_segment_projection.py \
-        --input /path/ke/datasets/phase_4/paysim_full_scored.parquet \
-        --output /path/ke/datasets/phase_4/segment_projection.parquet
-
-    --per-segment 5000     jumlah sampel per segmen (default 5000)
-    --method umap          umap | tsne | auto (default auto: umap kalau ada, else tsne)
-    --seed 42
-
-Skrip ini TIDAK menjalankan ulang clustering - ia memakai kolom cluster_kmeans
-yang SUDAH ada di paysim_full_scored.parquet. Jadi jauh lebih ringan daripada
-menjalankan ulang seluruh phase 2.
-
-Setelah file segment_projection.parquet dihasilkan, taruh di folder yang sama
-dengan paysim_full_scored.parquet (di dalam datasets/phase_4/). Pipeline phase 5
-(flow.py) akan otomatis mendeteksi & memuatnya. Kalau file ini tidak ada,
-dashboard tetap jalan normal - hanya scatter segmen yang menampilkan pesan
-"jalankan tools/build_segment_projection.py untuk mengaktifkan".
-"""
 from __future__ import annotations
 
 import argparse

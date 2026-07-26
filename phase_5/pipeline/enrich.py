@@ -1,17 +1,3 @@
-"""
-pipeline/enrich.py
-====================
-Fungsi transformasi "lapisan presentasi" yang dipakai pipeline/flow.py.
-
-PENTING - batas tanggung jawab: modul ini TIDAK menghitung ulang clustering,
-association rules, atau anomaly detection (itu tugas Phase 2-4 kelompok yang
-sudah selesai dan HASILNYA dianggap final/benar). Modul ini HANYA menambah
-lapisan presentasi di atas hasil tsb: label Indonesia, dimensi filter
-kategorikal TAMBAHAN yang diturunkan dari kolom asli (isDestMerchant,
-origDrainedToZero - lihat catatan di config.py kenapa TIDAK ada dimensi
-spasial/temporal buatan), teks alasan anomali, dan penggabungan pool aturan
-asosiasi - supaya angka hasil analisis asli tidak pernah diubah/ditimpa.
-"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -24,14 +10,6 @@ import config as cfg
 
 
 def derive_dest_type(df: pd.DataFrame) -> pd.Series:
-    """'Merchant' / 'Nasabah' - langsung dari kolom isDestMerchant asli
-    (diturunkan Phase 1 dari prefix ID tujuan: M=merchant, C=customer).
-    Bukan dimensi buatan - ini atribut yang sudah ada di data.
-
-    Kebal tipe: isDestMerchant bisa berupa bool (True/False), int (1/0), atau
-    string ('1'/'0'/'True'/'M'). Semua diperlakukan benar - kalau dulu hanya
-    menangani bool, nilai integer/string bikin SEMUA jadi 'Nasabah' (Merchant
-    hilang dari filter)."""
     if "isDestMerchant" not in df.columns:
         return pd.Series(cfg.DEST_TYPE_LIST[1], index=df.index)
     col = df["isDestMerchant"]

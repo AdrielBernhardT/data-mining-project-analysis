@@ -1,21 +1,3 @@
-"""
-data_backend/duckdb_backend.py
-===============================
-Implementasi DataBackend memakai DuckDB. Berkas .duckdb dibangun oleh
-pipeline (pipeline/flow.py) sekali di awal; dashboard hanya membukanya
-sebagai READ-ONLY sehingga aman diakses banyak request sekaligus.
-
-KUNCI PERFORMA <100ms: dua tabel dengan peran berbeda -
-  - `cube`      : hasil pra-agregasi (group-by seluruh dimensi filter yang ada).
-                  Semua KPI/ringkasan/statistik query tabel ini (ribuan baris,
-                  bukan jutaan) sehingga tetap sangat cepat walau berjalan di
-                  satu core CPU sekalipun.
-  - `transaksi` : tabel baris-per-baris lengkap (6,3 juta baris), HANYA dipakai
-                  untuk pencarian/penjelajahan transaksi individual (Jelajah
-                  Data, Anomali) yang memang butuh baris asli, bukan agregat.
-Filter rentang nominal (amount_min/max) & pencarian teks HANYA berlaku pada
-`transaksi` (butuh baris individual); tidak memengaruhi ringkasan agregat.
-"""
 from __future__ import annotations
 
 import time
