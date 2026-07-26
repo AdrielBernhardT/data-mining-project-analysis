@@ -7,7 +7,7 @@ from sklearn.decomposition import PCA
 import hdbscan
 from prefect import task, flow, get_run_logger
 
-NON_FEATURE_COLS = ['isFraud', 'step']
+NON_FEATURE_COLS = ['isFraud']
 
 
 # 1. Kmeans (segmentasi 4 cluster)
@@ -142,10 +142,6 @@ def task_birch_hdbscan(input_path, output_path):
     subcluster_hdbscan_labels = hdbscan_birch.fit_predict(subcluster_centers)
     df['cluster_birch_hdbscan'] = subcluster_hdbscan_labels[subcluster_labels]
 
-    # FIX: outlier bukan selalu label -1 (noise). Cari cluster dengan fraud rate
-    # TERTINGGI secara eksplisit - itulah kelompok yang benar-benar presisi untuk
-    # deteksi risiko, terlepas dari nomor labelnya. Kolom ini yang dipakai Phase 3 & 4,
-    # BUKAN pengecekan cluster_birch_hdbscan == -1 secara langsung.
     cluster_fraud_rate = df.groupby('cluster_birch_hdbscan')['isFraud'].mean()
     high_risk_cluster_id = cluster_fraud_rate.idxmax()
     df['is_birch_hdbscan_outlier'] = (
