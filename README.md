@@ -25,6 +25,7 @@ A data mining project that analyzes the PaySim mobile money transaction dataset 
   - BIRCH + HDBSCAN
 
   Evaluation using:
+  - Elbow Method
   - Silhouette Score
   - Davies-Bouldin Index
   - Calinski-Harabasz Index
@@ -99,7 +100,7 @@ conda activate data-mining
 Install dependencies
 
 ```bash
-pip install -r requirement.txt
+pip install -r requirements.txt
 ```
 
 Start the server
@@ -108,10 +109,44 @@ Start the server
 prefect server start
 ```
 
-Start the dashboard
+Add PaySim dataset
 
 ```bash
-cd phase_5 && python app.py
+mkdir datasets
+cd datasets
+# Add dataset to this folder and rename to "paysim-dataset.csv"
+```
+
+Run phase 1
+
+```bash
+cd phase_1 && python phase_1.py
+```
+
+Run phase 2
+
+```bash
+cd phase_2 && python phase_2.py
+```
+
+Run phase 3
+
+```bash
+cd phase_3 && python phase_3.py
+```
+
+Run phase 4
+
+```bash
+cd phase_4 && python phase_4.py
+```
+
+Run phase 5 and start the dashboard
+
+```bash
+cd phase_5
+python -m pipeline.flow --mode real --data-root <YOUR_PROJECT_DIR>
+python app.py
 ```
 
 ## License
