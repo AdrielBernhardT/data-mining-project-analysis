@@ -1,18 +1,3 @@
-"""
-theme.py
-========
-Sistem desain terpusat untuk seluruh dashboard (warna, tipografi, dan template
-grafik Plotly). Semua modul chart/komponen WAJIB mengambil warna dan style dari
-sini supaya tampilan konsisten di semua halaman (termasuk hover, yang jadi
-salah satu catatan dosen: "yang di graph ada yang di hover ada yang ga").
-
-Filosofi palet: "ruang kendali risiko perbankan" - tenang, tegas, dapat
-dipercaya, dengan satu aksen hangat (emas/tembaga) untuk menandai hal yang
-butuh perhatian. Skala risiko memakai gradasi sejuk -> hangat -> panas
-(bukan hijau/merah generik) supaya tetap enak dibaca dan tidak norak.
-"""
-
-
 COLORS = {
     "bg": "#F2F4F9",
     "bg_alt": "#E9ECF4",

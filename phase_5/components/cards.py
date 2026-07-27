@@ -1,9 +1,4 @@
-"""
-components/cards.py
-=====================
-Komponen kartu yang dipakai berulang di berbagai halaman: KPI, kartu segmen,
-kartu pola/aturan, kartu metode anomali, kartu rekomendasi.
-"""
+
 from __future__ import annotations
 
 from dash import html, dcc
@@ -68,8 +63,6 @@ def _mini_stat(value: str, label: str) -> html.Div:
 
 
 def ranked_rule_card(row: dict, rank: int) -> html.Div:
-    """Kartu aturan dengan nomor peringkat besar di kiri - untuk daftar top-10
-    yang di-scroll vertikal (rank mudah dibaca, tak seperti grid 2 kolom)."""
     badge_class = {
         cfg.RULE_GROUP_FRAUD: "badge-danger", cfg.RULE_GROUP_SEGMENT: "badge-info",
         cfg.RULE_GROUP_OUTLIER: "badge-warning", cfg.RULE_GROUP_GENERAL: "badge-neutral",

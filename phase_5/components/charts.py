@@ -1,16 +1,3 @@
-"""
-components/charts.py
-======================
-Semua grafik di dashboard dibuat lewat fungsi-fungsi di sini supaya HOVER,
-WARNA, dan FONT konsisten di semua halaman (catatan dosen: "yang di graph ada
-yang di hover ada yang ga"). Setiap fungsi memanggil theme.apply_theme() di
-akhir.
-
-Prinsip "semua segmen harus kelihatan" (catatan dosen):
-grafik populasi (population_share_bar) memakai skala LOG + label angka selalu
-tampil di ujung bar, supaya segmen yang sangat kecil (mis. Segmen 0 = 0,03%)
-tetap terlihat & terbaca, bukan hilang jadi garis setipis rambut.
-"""
 from __future__ import annotations
 
 import numpy as np
@@ -22,8 +9,6 @@ from theme import COLORS, CATEGORICAL_SEQUENCE, RISK_COLOR_MAP, RISK_ORDER, segm
 
 
 def _empty_figure(message: str = "Tidak ada data untuk filter/pencarian ini.") -> go.Figure:
-    """Figure placeholder yang konsisten dgn tema, dipakai semua chart saat rows kosong
-    (mis. hasil filter/pencarian tidak menemukan apa pun) - supaya tidak error/crash."""
     fig = go.Figure()
     fig.add_annotation(text=message, showarrow=False, font=dict(size=13.5, color=COLORS["ink_faint"]),
                         xref="paper", yref="paper", x=0.5, y=0.5)
@@ -41,8 +26,6 @@ def _segment_label(cid) -> str:
 
 
 def _segment_label_short(cid) -> str:
-    """Label ringkas untuk sumbu grafik (mis. 'Segmen 1') - nama panjang bikin
-    label ketimpa/terkompres. Nama lengkap tetap tampil di hover."""
     try:
         return f"Segmen {int(cid)}"
     except (ValueError, TypeError):
@@ -52,8 +35,6 @@ def _segment_label_short(cid) -> str:
 def population_share_bar(rows: list[dict], selected_segment: int | None = None) -> go.Figure:
     if not rows:
         return _empty_figure()
-    """Bar horizontal skala LOG + label persentase & jumlah SELALU tampil,
-    supaya segmen sekecil apa pun tetap terlihat jelas (bukan cuma di hover)."""
     df = pd.DataFrame(rows).sort_values("cluster_kmeans")
     labels = [_segment_label(c) for c in df["cluster_kmeans"]]
     colors = [segment_color(c) for c in df["cluster_kmeans"]]
@@ -117,9 +98,6 @@ def segment_risk_bar(rows: list[dict], selected_segment: int | None = None) -> g
 def segment_radar(rows: list[dict], selected_segment: int | None = None) -> go.Figure:
     if not rows:
         return _empty_figure()
-    """Radar perbandingan karakteristik antar segmen (dinormalisasi 0-1 per
-    metrik) - menjawab catatan 'tambahkan grafik biar interaktif, bukan teks
-    doang' pada bagian karakteristik segmen."""
     df = pd.DataFrame(rows).sort_values("cluster_kmeans")
     metrics = ["population_share", "fraud_rate", "avg_risk_score", "high_risk_rate"]
     metric_labels = ["Pangsa populasi", "Tingkat fraud", "Rata-rata skor risiko", "Tingkat high-risk"]
@@ -225,8 +203,6 @@ def category_bar(rows: list[dict], cat_col: str, label_map: dict | None = None, 
 def fraud_by_score_chart(rows: list[dict]) -> go.Figure:
     if not rows:
         return _empty_figure()
-    """Dual-axis: batang = jumlah transaksi, garis = tingkat fraud. Menonjolkan
-    temuan 'Sedang (skor 2) justru fraud rate-nya lebih tinggi dari Kritis'."""
     df = pd.DataFrame(rows).sort_values("risk_score")
     fig = go.Figure()
     fig.add_trace(go.Bar(
@@ -269,9 +245,6 @@ def method_overlap_heatmap(matrix_rows: list[dict]) -> go.Figure:
 
 
 def category_breakdown_bar(rows: list[dict], category_col: str, metric: str = "transactions") -> go.Figure:
-    """Bar horizontal generik utk breakdown kategori 2 nilai (jenis tujuan,
-    status kuras, dst) - menggantikan wilayah_bar setelah dimensi spasial
-    buatan dihapus (dataset tidak punya atribut geografis asli)."""
     if not rows:
         return _empty_figure()
     df = pd.DataFrame(rows).sort_values(metric, ascending=True)
@@ -331,14 +304,11 @@ def rule_group_donut(rules_rows: list[dict]) -> go.Figure:
 
 
 def fraud_funnel(kpi: dict) -> go.Figure:
-    """Corong 3 tahap: seluruh transaksi -> antrean high-risk -> fraud tertangkap
-    di antrean. Menceritakan tujuan utama dataset (fraud) dalam satu grafik:
-    dari jutaan transaksi, model mempersempit ke antrean kecil yang jauh lebih
-    pekat fraud-nya. Interaktif (hover menampilkan angka & persentase)."""
     total = kpi.get("total_transaksi", 0) or 0
     high_risk = kpi.get("total_high_risk", 0) or 0
     hr_rate = kpi.get("high_risk_fraud_rate", None)
-    fraud_in_hr = int(round(high_risk * hr_rate)) if (high_risk and hr_rate) else 0
+    # fraud_in_hr = int(round(high_risk * hr_rate)) if (high_risk and hr_rate) else 0
+    fraud_in_hr = high_risk * hr_rate
     if not total:
         return _empty_figure()
 

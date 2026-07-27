@@ -1,31 +1,3 @@
-"""
-data_backend/base.py
-=====================
-Kontrak bersama untuk sumber data dashboard. Dashboard TIDAK PERNAH memanggil
-DuckDB atau Elasticsearch secara langsung - selalu lewat antarmuka ini, supaya
-kedua backend bisa saling menggantikan tanpa mengubah kode halaman/callback.
-
-Kenapa dua backend?
-- ElasticsearchBackend  : jalur "produksi" sesuai permintaan - dipakai kalau
-  kelompok menjalankan Elasticsearch (lihat docker-compose.yml).
-- DuckDBBackend         : jalan otomatis tanpa instalasi tambahan apa pun,
-  tetap memenuhi target <100ms pada 6,3 juta baris (lihat BENCHMARK.md),
-  dan dipakai sebagai fallback kalau Elasticsearch sedang tidak menyala -
-  dashboard tidak pernah "mati" gara-gara satu servis down.
-
-Setiap method menerima `filters: dict` dengan kunci opsional berikut (semua
-opsional, nilai kosong/None berarti "semua data"):
-    jenis_tujuan: list[str]       (Merchant/Nasabah)
-    status_kuras: list[str]       (Terkuras Habis/Tidak Terkuras)
-    jenis_transaksi: list[str]
-    segmen: list[int]
-    risk_level: list[str]
-    investigation_category: list[str]
-    anomaly_type: list[str]
-    search: str                  (dicari pada transaction_id & anomaly_reason)
-    amount_min / amount_max: float
-    risk_score_min / risk_score_max: int
-"""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

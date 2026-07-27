@@ -1,9 +1,3 @@
-"""
-pages/ringkasan.py - Ringkasan Eksekutif (halaman utama, path "/")
-
-Fokus: fraud sebagai tujuan utama dataset. Proporsi teks-grafik seimbang -
-KPI ringkas + 3 grafik interaktif yang menceritakan fraud, teks pendek.
-"""
 from __future__ import annotations
 
 import dash

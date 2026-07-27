@@ -1,10 +1,3 @@
-"""
-pages/pola.py - Pola & Aturan Asosiasi (Association Rules)
-
-Semua filter (kelompok, atribut, confidence, lift) ada di SIDEBAR untuk
-konsistensi. Scatter confidence-vs-lift jadi visual utama (intuitif untuk
-association rules). Teks dipangkas, rekomendasi ditambahkan.
-"""
 from __future__ import annotations
 
 import dash

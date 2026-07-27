@@ -1,28 +1,3 @@
-"""
-data_backend/es_backend.py
-============================
-Implementasi DataBackend memakai Elasticsearch. Ini jalur yang diminta di
-brief awal ("pake elastic search kalo bisa"). Jalankan `docker-compose up -d`
-(lihat docker-compose.yml di root project) lalu jalankan pipeline
-(`python -m pipeline.flow`) untuk mengisi index-nya.
-
-Kenapa Elasticsearch cocok di sini:
-- Agregasi (terms/filter aggregation) atas jutaan baris tetap <100ms karena
-  Elasticsearch menghitungnya dari struktur index (inverted index + doc
-  values per-kolom), bukan memindai baris satu per satu.
-- Pencarian bebas (full-text) pada anomaly_reason / transaction_id memakai
-  inverted index -> ini keunggulan dibanding pemindaian LIKE/ILIKE biasa
-  (lihat catatan performa di README/BENCHMARK.md - inilah tepatnya kasus
-  yang paling lambat di mode fallback DuckDB, dan paling diuntungkan kalau
-  Elasticsearch benar-benar dinyalakan).
-
-Catatan lingkungan pengembangan: sandbox tempat proyek ini dibangun tidak
-memiliki akses jaringan ke elastic.co / Docker Hub (lihat README bagian
-"Batasan lingkungan pengembangan"), sehingga kelas ini tidak bisa diuji
-langsung terhadap cluster asli di sana - tapi memakai elasticsearch-py resmi
-dengan Query DSL standar, dan struktur query-nya dites lewat query yang
-dihasilkan (lihat tools/test_es_backend.py).
-"""
 from __future__ import annotations
 
 from typing import Any, Optional

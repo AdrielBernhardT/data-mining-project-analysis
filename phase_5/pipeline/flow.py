@@ -1,37 +1,3 @@
-"""
-pipeline/flow.py
-==================
-Pipeline Prefect Phase 5 - satu perintah untuk membangun seluruh data yang
-dipakai dashboard, menyambung gaya pipeline Phase 1-4 kelompok sebelumnya
-(@flow/@task Prefect yang sama).
-
-CARA PAKAI
-----------
-1) Kalau kelompok sudah punya output Phase 1-4 asli di komputer sendiri:
-
-     python -m pipeline.flow --mode real --data-root /path/ke/project
-
-   `--data-root` diharapkan berisi struktur folder yang SAMA seperti dashboard
-   versi sebelumnya (phase_2/, phase_3/, phase_4/, models/) - lihat README.
-   Kalau tersedia, pipeline akan lebih memilih dataset skor PENUH (6,3 juta
-   baris) bila kelompok menambahkan satu baris export di phase_4.py (lihat
-   README bagian "Mengaktifkan pencarian atas seluruh 6,3 juta baris"). Kalau
-   tidak ada, pipeline otomatis jalan dengan cakupan baris yang lebih sempit
-   (20.000 transaksi paling mencurigakan dari top_suspicious_light.parquet)
-   dan memberi tahu jelas lewat log + manifest.json.
-
-2) Mode demo/pengembangan (dipakai saat proyek ini dibangun, TANPA data asli):
-
-     python -m pipeline.flow --mode synthetic
-
-   Menghasilkan dataset uji ~6,3 juta baris yang meniru statistik agregat
-   asli (lihat tools/generate_synthetic_data.py) - PENTING dipakai HANYA
-   untuk uji coba dashboard, bukan pengganti data asli kelompok.
-
-Kedua mode berakhir di artefak yang sama: data/paysim_dashboard.duckdb (selalu
-ditulis) + index Elasticsearch (ditulis best-effort kalau ELASTICSEARCH_URL
-bisa dihubungi; pipeline TIDAK gagal total kalau Elasticsearch mati).
-"""
 from __future__ import annotations
 
 import argparse

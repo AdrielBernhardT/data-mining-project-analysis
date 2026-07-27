@@ -1,15 +1,3 @@
-"""
-tools/diagnosa.py
-=================
-Skrip diagnostik untuk memastikan KENAPA tab Segmentasi / Anomali kosong.
-Menjalankan pengecekan berlapis dan mencetak hasilnya dengan jelas.
-
-CARA PAKAI (dari folder phase_5):
-
-    python tools/diagnosa.py
-
-Skrip ini TIDAK mengubah apa pun - hanya membaca & melapor.
-"""
 from __future__ import annotations
 import os
 import sys

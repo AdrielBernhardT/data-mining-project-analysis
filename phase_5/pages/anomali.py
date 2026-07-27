@@ -1,10 +1,3 @@
-"""
-pages/anomali.py - Aktivitas Tidak Wajar (Deteksi Anomali)
-
-Fokus: justifikasi KENAPA suatu transaksi dianggap anomali. Teks dipangkas,
-grafik interaktif jadi utama. Tabel transaksi menonjolkan kolom "Alasan
-Ditandai" (metode mana yang menandai + sebabnya) sebagai justifikasi per baris.
-"""
 from __future__ import annotations
 
 import dash
