@@ -11,3 +11,4 @@ elasticsearch>=8.14,<9.0
 
 # Pipeline
 prefect>=3.0
+gunicorn>=22.0
