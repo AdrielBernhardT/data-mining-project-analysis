@@ -6,10 +6,12 @@ from sklearn.preprocessing import RobustScaler
 from scipy.stats import entropy as scipy_entropy
 from joblib import dump
 
+path = "/home/adriel/Desktop/Coding/data-mining-project-analysis/datasets/paysim-dataset.csv"
 # LOAD DATA
 @task
 def load_data(path):
     logger = get_run_logger()
+
     df = pd.read_csv(path)
     
     describe = df.describe()

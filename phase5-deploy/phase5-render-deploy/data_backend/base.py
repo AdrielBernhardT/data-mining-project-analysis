@@ -1,0 +1,129 @@
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Any, Optional
+
+
+@dataclass
+class Filters:
+    jenis_tujuan: list = field(default_factory=list)
+    status_kuras: list = field(default_factory=list)
+    jenis_transaksi: list = field(default_factory=list)
+    segmen: list = field(default_factory=list)
+    risk_level: list = field(default_factory=list)
+    investigation_category: list = field(default_factory=list)
+    anomaly_type: list = field(default_factory=list)
+    search: str = ""
+    amount_min: Optional[float] = None
+    amount_max: Optional[float] = None
+    risk_score_min: Optional[int] = None
+    risk_score_max: Optional[int] = None
+
+    @classmethod
+    def from_dict(cls, d: Optional[dict]) -> "Filters":
+        if not d:
+            return cls()
+        known = {f: d.get(f) for f in cls.__dataclass_fields__ if d.get(f) not in (None, [], "")}
+        return cls(**known)
+
+    def is_empty(self) -> bool:
+        return self == Filters()
+
+
+class DataBackend(ABC):
+    """Kontrak yang wajib dipenuhi setiap backend data."""
+
+    name: str = "backend"
+
+    @abstractmethod
+    def ping(self) -> bool:
+        """True kalau backend siap dipakai (mis. koneksi ES berhasil)."""
+
+    def get_segment_projection(self, filters: "Filters", method: str | None = None, dim: int | None = None) -> list[dict]:
+        """Titik koordinat UMAP/t-SNE untuk scatter segmen. Default membaca file
+        DuckDB (selalu dibangun pipeline, walau backend aktif Elasticsearch).
+        method/dim memilih varian. Kembalikan [] kalau tak ada - dashboard tetap
+        jalan. DuckDBBackend meng-override agar memakai koneksinya sendiri."""
+        try:
+            from data_backend.duckdb_backend import DuckDBBackend
+            import config as cfg
+            db = DuckDBBackend(cfg.DUCKDB_PATH, read_only=True)
+            try:
+                return db.get_segment_projection(filters, method=method, dim=dim)
+            finally:
+                db._con.close()
+        except Exception:
+            return []
+
+    @abstractmethod
+    def get_kpi(self, filters: Filters) -> dict[str, Any]:
+        """Total transaksi, fraud, high-risk, fraud_rate, enrichment untuk filter aktif."""
+
+    @abstractmethod
+    def get_segment_summary(self, filters: Filters) -> list[dict]:
+        """Statistik per segmen (dihitung ulang sesuai filter aktif)."""
+
+    def get_cluster_profile(self, filters: "Filters") -> list[dict]:
+        """Profil per segmen (jenis transaksi dominan, fraud/high-risk/merchant
+        share). Default membaca DuckDB langsung; DuckDBBackend meng-override.
+        ES backend memakai default ini (DuckDB selalu dibangun pipeline)."""
+        try:
+            from data_backend.duckdb_backend import DuckDBBackend
+            import config as cfg
+            db = DuckDBBackend(cfg.DUCKDB_PATH, read_only=True)
+            try:
+                return db.get_cluster_profile(filters)
+            finally:
+                db._con.close()
+        except Exception:
+            return []
+
+    @abstractmethod
+    def get_risk_summary(self, filters: Filters) -> list[dict]:
+        ...
+
+    @abstractmethod
+    def get_anomaly_type_summary(self, filters: Filters) -> list[dict]:
+        ...
+
+    @abstractmethod
+    def get_investigation_summary(self, filters: Filters) -> list[dict]:
+        ...
+
+    @abstractmethod
+    def get_fraud_by_score(self, filters: Filters) -> list[dict]:
+        ...
+
+    @abstractmethod
+    def get_method_overlap(self, filters: Filters) -> list[dict]:
+        ...
+
+    @abstractmethod
+    def get_dest_type_breakdown(self, filters: Filters) -> list[dict]:
+        ...
+
+    @abstractmethod
+    def get_drain_status_breakdown(self, filters: Filters) -> list[dict]:
+        ...
+
+    @abstractmethod
+    def get_transaction_type_breakdown(self, filters: Filters) -> list[dict]:
+        ...
+
+    @abstractmethod
+    def search_transactions(
+        self, filters: Filters, sort_col: str = "risk_score", sort_dir: str = "desc",
+        page: int = 1, page_size: int = 25,
+    ) -> tuple[list[dict], int]:
+        """Kembalikan (baris_halaman_ini, total_baris_cocok_filter)."""
+
+    @abstractmethod
+    def get_rules(self, rule_group: Optional[str] = None, min_lift: float = 0.0,
+                  search: str = "", limit: Optional[int] = None,
+                  min_confidence: float = 0.0, attribute: Optional[str] = None) -> list[dict]:
+        ...
+
+    @abstractmethod
+    def count(self, filters: Filters) -> int:
+        ...
