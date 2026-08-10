@@ -16,6 +16,7 @@ BUILD_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BUILD_DIR / "data"
 SYN_PATH = DATA_DIR / "raw_synthetic" / "synthetic_transactions.parquet"
 DUCKDB_PATH = DATA_DIR / "paysim_dashboard.duckdb"
+PROJECTION_PATH = DATA_DIR / "raw_synthetic" / "segment_projection.parquet"
 
 MIN_SUPPORT = 0.005
 MIN_CONFIDENCE = 0.50
@@ -226,6 +227,14 @@ def main():
     assert check == n_transaksi, "cube tidak konsisten dengan tabel transaksi!"
     for col in ["jenis_tujuan", "status_kuras", "transaction_type", "cluster_kmeans", "risk_level"]:
         con.execute(f"CREATE INDEX idx_cube_{col} ON cube ({col})")
+
+    print("5) Memuat tabel projection (koordinat scatter segmen, jika tersedia) ...")
+    if PROJECTION_PATH.exists():
+        con.execute("CREATE TABLE projection AS SELECT * FROM read_parquet(?)", [str(PROJECTION_PATH)])
+        n_proj = con.execute("SELECT COUNT(*) FROM projection").fetchone()[0]
+        print(f"   projection: {n_proj:,} baris")
+    else:
+        print(f"   [skip] {PROJECTION_PATH} tidak ditemukan - scatter segmen tetap nonaktif")
 
     con.close()
     print(f"Selesai -> {DUCKDB_PATH}")

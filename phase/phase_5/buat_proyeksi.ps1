@@ -1,5 +1,5 @@
 param(
-    [string]$DataRoot = "D:\Fance\College\Cawu 5\Data Mining\project\data-mining",
+    [string]$DataRoot = "/home/adriel/Desktop/Coding/data-mining-project-analysis/phase/phase_5",
     [switch]$SkipUmapInstall
 )
 
