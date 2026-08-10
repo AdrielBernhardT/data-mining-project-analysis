@@ -21,3 +21,6 @@ dash
 plotly
 duckdb
 elasticsearch
+
+scikit-learn
+umap-learn

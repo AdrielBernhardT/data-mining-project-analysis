@@ -11,6 +11,9 @@ pyarrow>=16.0
 # Server produksi (dipakai Render lewat Start Command)
 gunicorn>=22.0
 
+scikit-learn
+umap-learn
+
 # CATATAN:
 # - elasticsearch & prefect SENGAJA tidak dimasukkan di sini.
 #   Keduanya cuma dipakai saat proses BUILD pipeline (pipeline/flow.py),
